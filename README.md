@@ -33,7 +33,7 @@ systems. The UNIX du (disk usage) command can take days to complete with
 large file systems.  This is a long time to wait while your file system is full
 and users are calling you.  Pwalk was written to solve the problem of walking large single name space file system in a timely manor.  The typical usage of pwalk is to report on NFS mounted file systems. 
 
-### Output ### 
+### Output ###
 The output of pwalk is designed to be loaded into a relational database. 
 Large file systems are difficult to examine browse or examine by hand. A 
 practical approach to examine the file system metadata is with SQL.  Pwalk 
@@ -90,6 +90,7 @@ perform about 8,000 to 30,000 stat commands per second.
 Example performance metric: 50,000,000 files at a rate of 20,000 stats per
 second should take about 41 minutes to complete. 
 
+### Author ###
 Pwalk is written by John Dey.  I have been a UNIX/Linux administrator since
 the days of VAXes and BSD 4.2.  I have been privileged to support scientific
 researchers and their data since the mid 1990’s.  I hope you will find pwalk 
