@@ -5,6 +5,7 @@ Tools to help system administors monitor very large file systems
 
 ### pwalk ###
 pwalk (Parallel Walk). Walk a file system using many threads in parallel.
+During the walk output inode information for every file. One line of output per file. 
 
 ### Build and install ###
 pwalk is a single C program.  Once compiled pwalk runs on every flavor of 
@@ -13,7 +14,7 @@ Installing the 'lib32gcc1' package to Ubuntu provides all the libraries and
 tools necessary to build pwalk. To build pwalk just compile pwalk.c. This one
 gcc command is that is needed.
 
-gcc -pthread pwalk.c -o pwalk
+	gcc -pthread pwalk.c -o pwalk
 
 ### Purpose ###
 pwalk was written to solve the problem of reporting disk usage for large file 
@@ -23,26 +24,25 @@ store file meta data within the file system. The only way to discover and
 report on all meta data is to walk the whole file system tree.  pwalk walks 
 a file system in parallel using many threads. 
 
-### Why write pwalk? ### 
-Large file systems that support interactive users do not use storage in a 
-deterministic way. As a system administrator I was not able to answer simple 
+### Why write pwalk?
+Large file systems that support interactive users do not grow in a 
+deterministic way.  As a system administrator I was not able to answer simple 
 questions like: Who used the last 10TB of disk space last night?  There is 
 no efficient method of discovering this information with very large file 
 systems. The UNIX du (disk usage) command can take days to complete with 
-large file systems.  This is a long time to wait while users are calling you.
-Even modern Internet size file systems do not provide APIs to all the metadata
-in a file system.  
+large file systems.  This is a long time to wait while your file system is full
+and users are calling you.  Pwalk was written to solve the problem of walking large single name space file system in a timely manor.  The typical usage of pwalk is to report on NFS mounted file systems. 
 
 ### Output ### 
-The output of pwalk is designed to be loaded into a relational database. The
-size of file systems is much too large be understood or browsed by hand. A 
+The output of pwalk is designed to be loaded into a relational database. 
+Large file systems are difficult to examine browse or examine by hand. A 
 practical approach to examine the file system metadata is with SQL.  Pwalk 
 performs a ‘stat’ on each file and every field of the inode is reported in 
 CSV format. One file is reported per line of output.  pwalk complains about
-files names that do not load into 'MYSQL' varchar input.  The file names are
-POSIX compliant but MYSQL has many limits about what can be loaded into 
-varchar. In my environement pwalk complains about a few hundred files per file
-system which is a very very small percentage of the 52 millioin files. There
+file names that do not load into 'MYSQL' varchar fields.  File names are
+POSIX compliant but MYSQL has many limits about what can be loaded into a 
+varchar field. In my environement pwalk complains about a few hundred files per file
+system which is a very very small percentage of the 52 million files. There
 should be a flag to report all file names and not just DB safe file names.
 Output can seem to be random since the program is threaded but every 
 file does get reported. 
@@ -65,7 +65,7 @@ SQL allows you to look at file systems differently and more efficiently than
 just browsing a file system by hand.  As an example: How many files have been
 created in the last seven days, sorted by size and grouped by user.  
 
-select uid, count(*), sum(size) from FSdata where ctime >  unix_timestamp( date_sub(now(), interval 7 day) ) group by uid order by 3;
+	select uid, count(*), sum(size) from FSdata where ctime >  unix_timestamp( date_sub(now(), interval 7 day) ) group by uid order by 3;
 
 Two additional data fields are reported by pwalk when a file is a directory;
 sum in byes and number of files contained in each directory. If a file is not
