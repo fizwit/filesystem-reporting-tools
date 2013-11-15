@@ -34,6 +34,12 @@ large file systems.  This is a long time to wait while your file system is full
 and users are calling you.  Pwalk was written to solve the problem of walking large single name space file system in a timely manor.  The typical usage of pwalk is to report on NFS mounted file systems. 
 
 ### Output ###
+November 2013 - Two new fields have been added to the output. 
+Parent Inode and directory level have been added to the
+output.  parent Inode is output for every file.  Parent inode for the top
+level directory is set to zero to identify the top of the tree.  Directory 
+level counter starts at zero relative to the directoy that is being reported on.
+
 The output of pwalk is designed to be loaded into a relational database. 
 Large file systems are difficult to examine browse or examine by hand. A 
 practical approach to examine the file system metadata is with SQL.  Pwalk 
@@ -45,11 +51,12 @@ varchar field. In my environement pwalk complains about a few hundred files per 
 system which is a very very small percentage of the 52 million files. There
 should be a flag to report all file names and not just DB safe file names.
 Output can seem to be random since the program is threaded but every 
-file does get reported. 
+file does get reported.
 ctime, mtime and atime are reported natively in UNIX epoch time 
 (large integers). The file mode is reported as an octal string. Two additional 
-fields are populated for directories: number of files in the directory and 
-the size of all files in the directory.  All file and directory sizes are 
+fields are populated for directories: count of files in the directory and 
+the sum of file sizes of all files in the directory.  File count is -1 if a 
+file is not a directory.  All file and directory sizes are 
 reported in bytes. Symbolic links are reported (they are a file) but symbolic
 links are never followed.
 
