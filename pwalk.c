@@ -135,7 +135,7 @@ printHelp( ) {
    fprintf( stderr, "       --NoSnap Ignore directories with name .snapshot\n");
    fprintf( stderr, "output format: CSV\n" );
    fprintf( stderr, "fields : inode,parent-inode,directory-depth,\"filename\",\"fileExtension\",UID,GID,st_size,st_blocks\"," );
-   fprintf( stderr, "\"st_mode\",atime,mtime,ctime,count(files),sum(size)n");
+   fprintf( stderr, "\"st_mode\",atime,mtime,ctime,count(files),sum(size)\n");
 }
 
 /*
@@ -326,8 +326,8 @@ main( int argc, char* argv[] )
         printHelp( ); 
         exit( EXIT_FAILURE );
     }
-    argc--; argv++;
-    while ( argc > 1 ) {
+    argc--; argv++; 
+    while ( argc > 0 && *argv[0] == '-' ) {
         if ( !strcmp( *argv, "--NoSnap" ) )
            SNAPSHOT = 1; 
         if ( !strcmp( *argv, "--help" ) )
@@ -336,6 +336,7 @@ main( int argc, char* argv[] )
            printVersion( );
         argc--; argv++;
     }
+    if ( argc == 0 ) exit ( 0 );
     for ( i=0; i<MAXTHRDS; i++ ) {
         tdslot[i].THRDid = -1;
         if ( (error = pthread_attr_init( &tdslot[i].tattr )) )
