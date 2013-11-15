@@ -62,9 +62,24 @@ With this new line of code:
    16 threads are only using about 20% CPU with 10% IO wait. Based on this
    the thread count will be doubled to 32.
    2010.11.29 Add mutex for printStat    
-   2012.10.09 --NoSnap flag added.  ignore directories that have the name 
-              .snapshot
-   2013.08.02 john f dey; Add GNU license, --version flag added
+   2012.10.09 --NoSnap command line arrgument added.  
+              ignore directories that have the name .snapshot
+   2013.08.02 john f dey; Add GNU license, --version command line arg added
+   2013.10.07 john f dey; 
+      new Feature: Keep track of directory level, output parent inode
+      Each file has its inode and parent inode.  This will allow a topological view 
+      of the file system.
+      The top level dir has a parnet inode of 0. So finding the top of tree has been
+      made easy.
+      Changes:  value of "fileCnt" defaults to -1 if file is not a directory
+      many directories have zero files, zero is valid file count for a directory
+      This change will effect many SQL queries. Earlier versions were incorrent to
+      asume fileCNT == 0 is a regular file. Extra quotes have been removed from the 
+      CSV file.  This will save a small amount of file space for the output files.
+      (a few megabytes for some of our larger directories)
+      Improvements:  data structures are cleaned up. changes made to improve thread
+      performance. Expecthing this version to be 10% to 15% faster than previous.
+      
 
  */
 #include <stdio.h>
@@ -77,26 +92,28 @@ With this new line of code:
 #include <errno.h>
 #include <pthread.h>
 
-#undef THRD_DEBUG 
+#define THRD_DEBUG 
 
-static char *Version = "2.5 Aug 2 2013 John F Dey john@fuzzdog.com";
+static char *Version = "2.6 Nov 15 2013 John F Dey john@fuzzdog.com";
 static char *whoami = "pwalk";
 
 int SNAPSHOT =0; /* if set ignore directories called .snapshot */
 
-struct fileData {
-    char dname[FILENAME_MAX+1];  /* full path and basename */
-    int  THRDslot;              /* slot ID 0 - MAXTHRDS */ 
-    int  THRDid;                /* unique ID increaments with each new THRD */
+struct threadData {
+    char dname[FILENAME_MAX+1]; /* full path and basename */
+    long pinode;                /* Parent Inode */
+    long depth;                 /* directory depth */
+    long THRDid;                /* unique ID increaments with each new THRD */
     int  flag;                  /* 0 if thread; recursion > 0 */
+    struct stat pstat;          /* Parent inode stat struct */
     pthread_t thread_id;        /* system assigned */
     pthread_attr_t tattr;
     };
 
 #define MAXTHRDS 32
-int ThreadCNT  =0; /* ThreadCNT < MAXTHRDS */
+int ThreadCNT  = 1; /* ThreadCNT < MAXTHRDS */
 int totalTHRDS =0;
-struct fileData fdslot[MAXTHRDS];
+struct threadData tdslot[MAXTHRDS];
 pthread_mutex_t mutexFD;
 pthread_mutex_t mutexPrintStat;
 
@@ -117,25 +134,28 @@ printHelp( ) {
    fprintf( stderr, "Flags: --help --version \n" );
    fprintf( stderr, "       --NoSnap Ignore directories with name .snapshot\n");
    fprintf( stderr, "output format: CSV\n" );
-   fprintf( stderr, "fields : DateStamp,\"inode\",\"filename\",\"fileExtension\",\"UID\",\"GID\",\"st_size\",\"st_blocks\"," );
-   fprintf( stderr, "\"st_mode\",\"atime\",\"mtime\",\"ctime\",\"File Count\",\"Directory Size\"\n");
+   fprintf( stderr, "fields : inode,parent-inode,directory-depth,\"filename\",\"fileExtension\",UID,GID,st_size,st_blocks\"," );
+   fprintf( stderr, "\"st_mode\",atime,mtime,ctime,count(files),sum(size)n");
 }
 
 /*
  *  this needs to be in a crital secion  (and it is!)
  */
 void
-printStat( char *fname, char *exten, struct stat *f, long fileCnt, long dirSz )
+printStat( struct threadData *cur, char *exten, struct stat *f, 
+        long fileCnt, /* directory only - count files in directory */
+        long dirSz )  /* directory only - sum of files within directory */
 {
    char new[FILENAME_MAX+FILENAME_MAX];
    char out[FILENAME_MAX+FILENAME_MAX];
    char *s, *t = new;
    int cnt = 0;
+   long ino, pino;
    char Sep=',';  /* this was added to help with debugging */
 
    cnt =0;
    /* fix bad file name is moved inside printStat to make it thread safe */
-   s = fname;
+   s = cur->dname;
    while ( *s ) {
       if ( *s == '"' )
          *t++ = '\\';
@@ -148,133 +168,151 @@ printStat( char *fname, char *exten, struct stat *f, long fileCnt, long dirSz )
    *t++ = *s++;
    if ( cnt )
       fprintf( stderr, "Bad File: %s\n", new );
-
-   sprintf ( out, "\"%ld\",\"%s\",\"%s\",\"%ld\",\"%ld\",\"%ld\",\"%ld\",\"%07o\",\"%ld\",\"%ld\",\"%ld\",\"%ld\",\"%ld\"\n",
-    (long)f->st_ino, new, (exten)? exten:"", (long)f->st_uid,
+   /* regular files have a fileCnt of -1 */
+   if ( fileCnt != -1 ) {  /* directory */
+      ino = f->st_ino; pino = cur->pinode; }
+   else {  /* Not a directory */
+      ino = f->st_ino; pino = cur->pstat.st_ino; }
+   sprintf ( out, "%ld,%ld,%ld,\"%s\",\"%s\",%ld,%ld,%ld,%ld,\"%07o\",%ld,%ld,%ld,%ld,%ld\n",
+    ino, pino, cur->depth,
+    new, (exten)? exten:"", (long)f->st_uid,
     (long)f->st_gid, (long)f->st_size, (long)f->st_blocks, (int)f->st_mode,
-    (long)f->st_atime, (long)f->st_mtime, (long)f->st_ctime, fileCnt, dirSz );
+    (long)f->st_atime, (long)f->st_mtime, (long)f->st_ctime, 
+    fileCnt, dirSz );
     fputs( out, stdout );
 }
 
-/*
- *  Open a directory and read the conents.  Call stat with each
- *  file name. 
- *
- *  Recursively call self for each sub dir. 
- *
- *  print inode meta data for each file, one line per file in CSV format
- */
+/********************************
+    Open a directory and read the conents. 
+    call opendir with path passed in as an argument
+    stat every file from opendir 
+ 
+    If maxthread is not reached creat a new thread and call self
+    If no threads available Recursively call self for each directory 
+    from opendir. 
+ 
+    print inode meta data for each file, one line per file in CSV format
+    print directory information after every file is processed from
+    open dir.  Direcory information has - count of files, sum of file sizes
+
+*********************************/
 void
 *fileDir( void *arg ) 
 {
     char *s, *t, *u, *dot, *end_dname;
-    char fname[FILENAME_MAX+1];
-    int  slot, id, found;
+    int  slot, status;
     DIR *dirp;
     long localCnt =0; /* number of files in a specific directory */
     long localSz  =0; /* byte cnt of files in the local directory 2010.07 */
     struct dirent *d;
     struct stat f;
-    struct fileData *fd, local;
+    struct threadData *cur, *new, local;
 
-    fd = (struct fileData *) arg;
+    cur = (struct threadData *) arg;
 #ifdef THRD_DEBUG
-    printf( "Start %2d%5d %2d %s\n", fd->THRDslot, fd->THRDid, fd->flag, fd->dname );
+    fprintf( stderr, "msg=fileDir,threadID=%ld,rdepth=%d,file=%s\n",
+        cur->THRDid, cur->flag, cur->dname );
 #endif /* THRD_DEBUG */
-    if ( (dirp = opendir( fd->dname )) == NULL ) {
+    if ( (dirp = opendir( cur->dname )) == NULL ) {
         exit ( 1 );
     }
     /* find the end of fs->name and put '/' at the end <end_dname>
        points to char after '/' */
-    s = fd->dname + strlen(fd->dname);
+    s = cur->dname + strlen(cur->dname);
     *s++ = '/';
     end_dname = s;
     while ( (d = readdir( dirp )) != NULL ) {
         if ( strcmp(".",d->d_name) == 0 ) continue;
         if ( strcmp("..",d->d_name) == 0 ) continue;
         localCnt++;
-        s = d->d_name;
-        t = end_dname;
-        while ( *s ) 
+        s = d->d_name; t = end_dname;
+        while ( *s )  /* copy file name to end of current path */
             *t++ = *s++;
         *t = '\0'; 
-        if ( lstat ( fd->dname, &f ) == -1 ) {
-            fprintf( stderr, "error %2d%5d %2d %s\n", fd->THRDslot, fd->THRDid, fd->flag, fd->dname );
+        if ( lstat ( cur->dname, &f ) == -1 ) {
+            fprintf( stderr, "msg=lstat error,threadID=%ld,rdepth=%d,file=%s\n", 
+              cur->THRDid, cur->flag, cur->dname );
             continue;
         } 
         /* Follow Sub dirs recursivly but don't follow links */
         localSz += f.st_size;
         if ( S_ISDIR(f.st_mode) ) {
             if ( SNAPSHOT && !strcmp( ".snapshot", d->d_name ) ) {
-               fprintf( stderr, "SnapShot: %s\n", d->d_name );
-               continue;
+               continue; /* next file from raddir */
             }
             pthread_mutex_lock (&mutexFD);
             if ( ThreadCNT < MAXTHRDS ) {
-                ThreadCNT++;
-                id = totalTHRDS++;
-                slot =0; found = -1;
+                slot = 0;
                 while ( slot < MAXTHRDS ) {
-                    if ( fdslot[slot].THRDslot == -1 ) {
-                        found = slot;
+                    if ( tdslot[slot].THRDid == -1 ) {
+                        new = &tdslot[slot];
+                        new->THRDid = totalTHRDS++; 
+                        new->flag = 0;   /* recurse flag reset for new thread */
                         break;
                     }
                     slot++;
                 }
-                if ( found == -1 )
-                   fprintf( stderr, "SlotE %2d%5d %2d %s\n", fd->THRDslot, fd->THRDid, fd->flag, "no available threads" );
-                else
-                   fdslot[slot].THRDslot = slot;
-            } else 
-                slot = -1;
-            pthread_mutex_unlock (&mutexFD);
-            if ( slot != -1 ) {
-                strcpy( fdslot[slot].dname, (const char*)fd->dname );
-                fdslot[slot].THRDid = id;
-                fdslot[slot].flag = 0;
-                pthread_create( &fdslot[slot].thread_id, &fdslot[0].tattr, 
-                                fileDir, (void*)&fdslot[slot] );
+                if ( slot == MAXTHRDS )  { /* this would be bad */
+                   fprintf( stderr, "error=%s,threadID=%ld,rdepth=%d,ThreadCNT=%d\n",
+                   "\"no available threads\"", cur->THRDid, cur->flag, ThreadCNT );
+                   exit( 1 );
+                }
+                ThreadCNT++; /* allocate the thread */
             } else {
-                strcpy( local.dname, (const char*)fd->dname );
-                local.THRDslot = fd->THRDslot;
-                local.THRDid = fd->THRDid;
-                local.flag = fd->flag + 1;
-                fileDir( (void*) &local );
+                new = &local;
+                new->THRDid = cur->THRDid;
+                new->flag = cur->flag + 1;
+            }
+            pthread_mutex_unlock (&mutexFD);
+            /* create ponter to tdslot that will be used for next
+               call to fileDir - local or from array - shorten next block of
+               code
+             */
+            memcpy( &(new->pstat), &f, sizeof( struct stat ) );
+            strcpy( new->dname, (const char*)cur->dname );
+            new->depth  = cur->depth + 1;
+            new->pinode = cur->pstat.st_ino; /* Parent Inode */
+            if ( new->THRDid != cur->THRDid ) {  /* new thread available */
+                pthread_create( &tdslot[slot].thread_id, &tdslot[slot].tattr, 
+                                fileDir, (void*)new );
+            } else {
+                fileDir( (void*) new );
             }
         } else {
-           s = end_dname + 1; dot = '\0';
+           s = end_dname + 1; dot = '\0'; /* file extension */
            while ( *s ) { 
                if (*s == '.') dot = s+1; 
                     s++; }
            pthread_mutex_lock (&mutexPrintStat);
-           printStat( fd->dname, dot, &f, (long)0, (long)0 );
+           printStat( cur, dot, &f, (long)-1, (long)0 );
            pthread_mutex_unlock (&mutexPrintStat);
         }
     }
     closedir( dirp );
     *--end_dname = '\0';
-#ifdef THRD_DEBUG
-    printf( "Endig %2d%5d %2d<%s>\n", fd->THRDslot, fd->THRDid, fd->flag, fd->dname );
-#endif /* THRD_DEBUG */
-    if ( lstat ( fd->dname, &f ) == -1 ) {
-        fprintf( stderr, "ERROR %2d%5d %2d %s\n", fd->THRDslot, fd->THRDid, fd->flag, fd->dname );
-    } else {
-        s = end_dname - 1; dot = '\0';
-        while ( *s != '/' ) { if (*s == '.') dot = s+1; s--; }
-        if ( s+2 == dot ) /* this dot is next to the slash like /.R */
-            dot = '\0';
-        pthread_mutex_lock (&mutexPrintStat);
-        printStat( fd->dname, dot, &f, localCnt, localSz );
-        pthread_mutex_unlock (&mutexPrintStat);
-    }
-    if ( fd->flag == 0 ) { /* this instance of fileDir is a thread */ 
+    s = end_dname - 1; dot = '\0';
+    while ( *s != '/' ) { if (*s == '.') dot = s+1; s--; }
+    if ( s+2 == dot ) /* this dot is next to the slash like /.R */
+        dot = '\0';
+    pthread_mutex_lock (&mutexPrintStat);
+    printStat( cur, dot, &cur->pstat, localCnt, localSz );
+    pthread_mutex_unlock (&mutexPrintStat);
+    if ( cur->flag == 0 ) { /* this instance of fileDir is a thread */ 
         pthread_mutex_lock ( &mutexFD );
+#ifdef THRD_DEBUG
+        fprintf( stderr, "msg=endTHRD,threadID=%ld,rdepth=%d,file=<%s>\n",
+        cur->THRDid, cur->flag, cur->dname );
+#endif 
         --ThreadCNT;
-        fd->THRDslot = -1;
+        cur->THRDid = -1;
         pthread_mutex_unlock ( &mutexFD );
         pthread_exit( EXIT_SUCCESS );
     }
-    /* return ; */
+    /* else return ; */
+#ifdef THRD_DEBUG
+    fprintf( stderr, "msg=endRecurse,threadID=%ld,rdepth=%d,file=<%s>\n",
+        cur->THRDid, cur->flag, cur->dname );
+#endif /* THRD_DEBUG */
 }
 
 int
@@ -282,7 +320,7 @@ main( int argc, char* argv[] )
 {
     int error, i;
     char *s, *c;
-    void *status;
+    struct stat f;
 
     if ( argc < 2 ) {
         printHelp( ); 
@@ -299,22 +337,30 @@ main( int argc, char* argv[] )
         argc--; argv++;
     }
     for ( i=0; i<MAXTHRDS; i++ ) {
-        fdslot[i].THRDslot = -1;
-        if ( (error = pthread_attr_init( &fdslot[i].tattr )) )
+        tdslot[i].THRDid = -1;
+        if ( (error = pthread_attr_init( &tdslot[i].tattr )) )
             fprintf( stderr, "Failed to create pthread attr: %s\n",
                              strerror(error));
-        else if ( (error = pthread_attr_setdetachstate( &fdslot[i].tattr,
+        else if ( (error = pthread_attr_setdetachstate( &tdslot[i].tattr,
                              PTHREAD_CREATE_DETACHED)
                   ) )
             fprintf( stderr, "failed to set attribute detached: %s\n",
                              strerror(error));
     }
     pthread_mutex_init(&mutexFD, NULL);
-    strcpy( fdslot[0].dname, (const char*) *argv );
-    fdslot[0].THRDslot = ThreadCNT++;
-    fdslot[0].THRDid = totalTHRDS++;
-    fdslot[0].flag = 0;
-    pthread_create( &(fdslot[0].thread_id), &fdslot[0].tattr, fileDir, 
-                    (void*)&fdslot[0] );
+    pthread_mutex_init(&mutexPrintStat, NULL);
+
+    strcpy( tdslot[0].dname, (const char*) *argv );
+    if ( lstat( *argv, &f ) == -1 ) {
+        perror( "lstat: " ); 
+        exit( 1 ); 
+    }
+    memcpy( &tdslot[0].pstat, &f, sizeof( struct stat ) );
+    tdslot[0].THRDid = totalTHRDS++; /* first thread is zero */
+    tdslot[0].flag = 0;
+    tdslot[0].depth = 0;
+    tdslot[0].pinode = 0;
+    pthread_create( &(tdslot[0].thread_id), &tdslot[0].tattr, fileDir, 
+                    (void*)&tdslot[0] );
     pthread_exit( NULL );
 } 
