@@ -92,7 +92,7 @@ With this new line of code:
 #include <errno.h>
 #include <pthread.h>
 
-#define THRD_DEBUG 
+#undef THRD_DEBUG
 
 static char *Version = "2.6 Nov 15 2013 John F Dey john@fuzzdog.com";
 static char *whoami = "pwalk";
@@ -150,7 +150,7 @@ printStat( struct threadData *cur, char *exten, struct stat *f,
    char out[FILENAME_MAX+FILENAME_MAX];
    char *s, *t = new;
    int cnt = 0;
-   long ino, pino;
+   long ino, pino, depth;
    char Sep=',';  /* this was added to help with debugging */
 
    cnt =0;
@@ -168,13 +168,12 @@ printStat( struct threadData *cur, char *exten, struct stat *f,
    *t++ = *s++;
    if ( cnt )
       fprintf( stderr, "Bad File: %s\n", new );
-   /* regular files have a fileCnt of -1 */
    if ( fileCnt != -1 ) {  /* directory */
-      ino = f->st_ino; pino = cur->pinode; }
+      ino = f->st_ino; pino = cur->pinode; depth = cur->depth - 1;}
    else {  /* Not a directory */
-      ino = f->st_ino; pino = cur->pstat.st_ino; }
+      ino = f->st_ino; pino = cur->pstat.st_ino; depth = cur->depth; }
    sprintf ( out, "%ld,%ld,%ld,\"%s\",\"%s\",%ld,%ld,%ld,%ld,\"%07o\",%ld,%ld,%ld,%ld,%ld\n",
-    ino, pino, cur->depth,
+    ino, pino, depth,
     new, (exten)? exten:"", (long)f->st_uid,
     (long)f->st_gid, (long)f->st_size, (long)f->st_blocks, (int)f->st_mode,
     (long)f->st_atime, (long)f->st_mtime, (long)f->st_ctime, 

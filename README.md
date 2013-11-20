@@ -37,8 +37,8 @@ and users are calling you.  Pwalk was written to solve the problem of walking la
 November 2013 - Two new fields have been added to the output. 
 Parent Inode and directory level have been added to the
 output.  parent Inode is output for every file.  Parent inode for the top
-level directory is set to zero to identify the top of the tree.  Directory 
-level counter starts at zero relative to the directoy that is being reported on.
+level directory is set to zero which identifies the top of the tree.  Directory 
+level counter starts at zero relative to the directoy that is being reported on.The top level directory has a depth of -1.
 
 The output of pwalk is designed to be loaded into a relational database. 
 Large file systems are difficult to examine browse or examine by hand. A 
