@@ -1,0 +1,59 @@
+/*
+ *  argv.c 
+
+
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+
+static char *Version = "2.6 Nov 15 2013 John F Dey john@fuzzdog.com";
+static char *whoami = "pwalk";
+
+int
+main( int argc, char* argv[] )
+{
+    printf( "Argc: %d\n", argc );
+    if ( argc < 2 ) {
+        printHelp( ); 
+        exit( EXIT_FAILURE );
+    }
+    argc--; argv++; 
+    while ( argc >= 1 && *argv[0] == '-' ) {
+        if ( !strcmp( *argv, "--NoSnap" ) )
+           puts( "'No snaps\n" ); 
+        if ( !strcmp( *argv, "--help" ) )
+           puts( "Say something helpful\n" );
+        if ( !strcmp( *argv, "--version" ) || !strcmp( *argv, "-v" ) ) 
+           printf( "Version: %s\n", Version );
+        argc--; argv++;
+    }
+    for ( i=0; i<MAXTHRDS; i++ ) {
+        tdslot[i].THRDid = -1;
+        if ( (error = pthread_attr_init( &tdslot[i].tattr )) )
+            fprintf( stderr, "Failed to create pthread attr: %s\n",
+                             strerror(error));
+        else if ( (error = pthread_attr_setdetachstate( &tdslot[i].tattr,
+                             PTHREAD_CREATE_DETACHED)
+                  ) )
+            fprintf( stderr, "failed to set attribute detached: %s\n",
+                             strerror(error));
+    }
+    pthread_mutex_init(&mutexFD, NULL);
+    pthread_mutex_init(&mutexPrintStat, NULL);
+
+    strcpy( tdslot[0].dname, (const char*) *argv );
+    if ( lstat( *argv, &f ) == -1 ) {
+        perror( "lstat: " ); 
+        exit( 1 ); 
+    }
+    memcpy( &tdslot[0].pstat, &f, sizeof( struct stat ) );
+    tdslot[0].THRDid = totalTHRDS++; /* first thread is zero */
+    tdslot[0].flag = 0;
+    tdslot[0].depth = 0;
+    tdslot[0].pinode = 0;
+    pthread_create( &(tdslot[0].thread_id), &tdslot[0].tattr, fileDir, 
+                    (void*)&tdslot[0] );
+    pthread_exit( NULL );
+} 
