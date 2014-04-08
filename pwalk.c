@@ -92,7 +92,7 @@ With this new line of code:
 #include <errno.h>
 #include <pthread.h>
 
-#undef THRD_DEBUG
+/* #define THRD_DEBUG */
 
 static char *Version = "2.6 Nov 15 2013 John F Dey john@fuzzdog.com";
 static char *whoami = "pwalk";
