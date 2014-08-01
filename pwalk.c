@@ -79,7 +79,7 @@ With this new line of code:
       (a few megabytes for some of our larger directories)
       Improvements:  data structures are cleaned up. changes made to improve thread
       performance. Expecthing this version to be 10% to 15% faster than previous.
-      
+   2013.08.01 john f dey improve command line argument errors
 
  */
 #include <stdio.h>
@@ -94,7 +94,7 @@ With this new line of code:
 
 /* #define THRD_DEBUG */
 
-static char *Version = "2.6 Nov 15 2013 John F Dey john@fuzzdog.com";
+static char *Version = "2.6.1 Aug 1 2014 John F Dey john@fuzzdog.com";
 static char *whoami = "pwalk";
 
 int SNAPSHOT =0; /* if set ignore directories called .snapshot */
@@ -151,7 +151,6 @@ printStat( struct threadData *cur, char *exten, struct stat *f,
    char *s, *t = new;
    int cnt = 0;
    long ino, pino, depth;
-   char Sep=',';  /* this was added to help with debugging */
 
    cnt =0;
    /* fix bad file name is moved inside printStat to make it thread safe */
@@ -335,7 +334,10 @@ main( int argc, char* argv[] )
            printVersion( );
         argc--; argv++;
     }
-    if ( argc == 0 ) exit ( 0 );
+    if ( argc == 0 ) {
+       printVersion();
+       exit(1);
+    }
     for ( i=0; i<MAXTHRDS; i++ ) {
         tdslot[i].THRDid = -1;
         if ( (error = pthread_attr_init( &tdslot[i].tattr )) )
