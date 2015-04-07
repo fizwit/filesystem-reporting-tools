@@ -96,7 +96,7 @@ With this new line of code:
 
 /* #define THRD_DEBUG */
 
-static char *Version = "2.6.1 Aug 1 2014 John F Dey john@fuzzdog.com";
+static char *Version = "2.6.2 Aug 7 2015 John F Dey john@fuzzdog.com";
 static char *whoami = "pwalk";
 
 int SNAPSHOT =0; /* if set ignore directories called .snapshot */
