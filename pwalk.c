@@ -277,10 +277,11 @@ void
                 fileDir( (void*) new );
             }
         } else {
-           s = end_dname + 1; dot = '\0'; /* file extension */
-           while ( *s ) { 
+           s = end_dname + 1; dot = NULL; /* file extension */
+           while ( *s ) {
                if (*s == '.') dot = s+1; 
-                    s++; }
+               s++; 
+           }
            pthread_mutex_lock (&mutexPrintStat);
            printStat( cur, dot, &f, (long)-1, (long)0 );
            pthread_mutex_unlock (&mutexPrintStat);
@@ -288,10 +289,12 @@ void
     }
     closedir( dirp );
     *--end_dname = '\0';
-    s = end_dname - 1; dot = '\0';
-    while ( *s != '/' ) { if (*s == '.') dot = s+1; s--; }
-    if ( s+2 == dot ) /* this dot is next to the slash like /.R */
-        dot = '\0';
+    s = end_dname - 1; dot = NULL;
+    while ( *s != '/' ) { 
+       if (*s == '.') { dot = s+1; break; }
+       s--; }
+    if ( s+1 == dot ) /* Dot file is not an extension Exp: /.bashrc */
+       dot = NULL;
     pthread_mutex_lock (&mutexPrintStat);
     printStat( cur, dot, &cur->pstat, localCnt, localSz );
     pthread_mutex_unlock (&mutexPrintStat);
