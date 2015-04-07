@@ -80,6 +80,8 @@ With this new line of code:
       Improvements:  data structures are cleaned up. changes made to improve thread
       performance. Expecthing this version to be 10% to 15% faster than previous.
    2013.08.01 john f dey improve command line argument errors
+   2015.03.07 john f dey Fix bug with directory file extensions having more than one
+              dot '.' in the file name. 
 
  */
 #include <stdio.h>
