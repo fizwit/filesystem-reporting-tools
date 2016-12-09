@@ -1,7 +1,7 @@
 /*
  *  pwalk.c  Parrallel Walk a file system and report file meta data 
 
-Copyright (C) 2013 John F Dey 
+Copyright (C) (2013-2016) John F Dey 
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
@@ -17,72 +17,6 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
- *  pwalk is inspired by du but designed to be used with large 
- *  file systems ( > 10 million files ) 
- *  
- *  History: dir.c, walk.c, walkv2,3,4, pwalkfs.c
- *
- *  Example of using the directory call, opendir and readdir to
- *  simulate ls.
- *
- *  1997.03.20 John Dey Although this is the first documented date for
- *             this file I have versions that date from 1988. 
- *  2002.09.04 John Dey walk the directory and gather stats
- *  2002.09.06 John Dey make to look like du -a
- *  2004.07.06 John Dey add -a and -k 
- *  2008.04.01 John Dey CSV output for database use
- *  2009.04.12 John Dey v3.1
- *  replaced constants with "FILENAME_MAX", 
- *  Size of directory is size of all files in directory plus itself
- *  Added printStat function
- *  print file count on line with direcories
- *  2009.05.18 check for control charaters and double qutoes in file names; 
- *  escape the double quotes and print bad file names to stderr
- *  2009.12.30 size for dir should just be dir size; Fix; count returns 0 
- *  for normal files and count of just the local directory; Previously count
- *  return the recursive file count for the whole tree. 
- *
-    2010.01.08 john dey; New field to output: file name extension. 
-    Extension is defined as the last part of the name after a Dot "." 
-    if no dot is found extension is empty ""
-    new feature: accepts multible dirctory names as cmd line argument
-
-This line of code has been replaced 
-     if ( f.st_mode & S_IFDIR && (f.st_mode & S_IFMT != S_IFLNK) ) {
-With this new line of code:
-     if ( S_ISDIR(f.st_mode)  ) { Or I could have done: if ( (f.st_mode & S_IFDIR) == S_IFDIR ) 
-   2010.01.11  John Dey
-   Complete re-write of walkv4 transforming it into pwalk.
-   pwalk is a threaded version of walkv4.
-   pwalk will call fileDir as a new thread until MAXTHRDS is reached.
-   2010.02.01 pwalk v1 did not detach nor did it join the theads; v2
-   fixes this short comming;
-
-   2010.03.24 john dey; New physical hardware is available to run pwalk.
-   16 threads are only using about 20% CPU with 10% IO wait. Based on this
-   the thread count will be doubled to 32.
-   2010.11.29 Add mutex for printStat    
-   2012.10.09 --NoSnap command line arrgument added.  
-              ignore directories that have the name .snapshot
-   2013.08.02 john f dey; Add GNU license, --version command line arg added
-   2013.10.07 john f dey; 
-      new Feature: Keep track of directory level, output parent inode
-      Each file has its inode and parent inode.  This will allow a topological view 
-      of the file system.
-      The top level dir has a parnet inode of 0. So finding the top of tree has been
-      made easy.
-      Changes:  value of "fileCnt" defaults to -1 if file is not a directory
-      many directories have zero files, zero is valid file count for a directory
-      This change will effect many SQL queries. Earlier versions were incorrent to
-      asume fileCNT == 0 is a regular file. Extra quotes have been removed from the 
-      CSV file.  This will save a small amount of file space for the output files.
-      (a few megabytes for some of our larger directories)
-      Improvements:  data structures are cleaned up. changes made to improve thread
-      performance. Expecthing this version to be 10% to 15% faster than previous.
-   2013.08.01 john f dey improve command line argument errors
-   2015.03.07 john f dey Fix bug with directory file extensions having more than one
-              dot '.' in the file name. 
-
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -93,11 +27,13 @@ With this new line of code:
 #include <time.h>
 #include <errno.h>
 #include <pthread.h>
+#include <unistd.h>
 
 /* #define THRD_DEBUG */
 
-static char *Version = "2.6.2 Aug 7 2015 John F Dey john@fuzzdog.com";
 static char *whoami = "pwalk";
+static char *Version = "2.6.3 Dec 9 2015 John F Dey john@fuzzdog.com";
+// static char *Version = "2.6.2 Aug 7 2015 John F Dey john@fuzzdog.com";
 
 int SNAPSHOT =0; /* if set ignore directories called .snapshot */
 
@@ -331,17 +267,20 @@ main( int argc, char* argv[] )
     }
     argc--; argv++; 
     while ( argc > 0 && *argv[0] == '-' ) {
-        if ( !strcmp( *argv, "--NoSnap" ) )
+        if ( !strcmp(*argv, "--NoSnap" ) )
            SNAPSHOT = 1; 
-        if ( !strcmp( *argv, "--help" ) )
+        if ( !strcmp(*argv, "--help" ) )
            printHelp( );
-        if ( !strcmp( *argv, "--version" ) || !strcmp( *argv, "-v" ) ) 
+        if ( !strcmp(*argv, "--version" ) || !strcmp( *argv, "-v" ) ) 
            printVersion( );
         argc--; argv++;
     }
     if ( argc == 0 ) {
-       printVersion();
+       printHelp();
        exit(1);
+    }
+    if (setuid((uid_t) 0)) {
+       fprintf(stderr, "unable to setuid root; not all files will be processed\n");
     }
     for ( i=0; i<MAXTHRDS; i++ ) {
         tdslot[i].THRDid = -1;
