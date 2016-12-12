@@ -76,42 +76,53 @@ printHelp( ) {
    fprintf( stderr, "\"st_mode\",atime,mtime,ctime,count(files),sum(size)\n");
 }
 
+/* Escape CSV delimeters */
+void
+csv_escape(char *in, char *out)
+{
+   char *t;
+   int cnt = 0;
+
+   t = out;
+   while ( *in ) {
+      if ( *in == '"' || *in == ',' || *in == '\\')
+         *out++ = '\\';
+      if ( *in < 32 ) {
+         in++;
+         cnt++;
+      } else
+         *out++ = *in++;
+   *out = '\0';
+   }
+   if ( cnt )
+      fprintf( stderr, "Bad File: %s\n", t);
+}
+
 /*
- *  this needs to be in a crital secion  (and it is!)
+ *  printStat this needs to be in a crital secion  (and it is!)
  */
 void
 printStat( struct threadData *cur, char *exten, struct stat *f, 
         long fileCnt, /* directory only - count files in directory */
         long dirSz )  /* directory only - sum of files within directory */
 {
-   char new[FILENAME_MAX+FILENAME_MAX];
    char out[FILENAME_MAX+FILENAME_MAX];
-   char *s, *t = new;
-   int cnt = 0;
+   char fname[FILENAME_MAX];
+   char exten_csv[FILENAME_MAX];
    long ino, pino, depth;
 
-   cnt =0;
-   /* fix bad file name is moved inside printStat to make it thread safe */
-   s = cur->dname;
-   while ( *s ) {
-      if ( *s == '"' )
-         *t++ = '\\';
-      if ( *s < 32 ) {
-         s++;
-         cnt++;
-      } else
-         *t++ = *s++;
-   }
-   *t++ = *s++;
-   if ( cnt )
-      fprintf( stderr, "Bad File: %s\n", new );
+   csv_escape(cur->dname, fname);
+   if ( exten )
+      csv_escape(exten, exten_csv);
+   else
+      exten_csv[0] = '\0';
    if ( fileCnt != -1 ) {  /* directory */
       ino = f->st_ino; pino = cur->pinode; depth = cur->depth - 1;}
    else {  /* Not a directory */
       ino = f->st_ino; pino = cur->pstat.st_ino; depth = cur->depth; }
    sprintf ( out, "%ld,%ld,%ld,\"%s\",\"%s\",%ld,%ld,%ld,%ld,\"%07o\",%ld,%ld,%ld,%ld,%ld\n",
     ino, pino, depth,
-    new, (exten)? exten:"", (long)f->st_uid,
+    fname, exten_csv, (long)f->st_uid,
     (long)f->st_gid, (long)f->st_size, (long)f->st_blocks, (int)f->st_mode,
     (long)f->st_atime, (long)f->st_mtime, (long)f->st_ctime, 
     fileCnt, dirSz );
