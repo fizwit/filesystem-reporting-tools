@@ -1,6 +1,11 @@
 # Change Log
 All notable changes to pwalk will be documented in this file.
 
+## 2016.12.12
+### Fixes
+  -- pwalk escapes properly on filename, but not extension:
+  -- escaping commas and backslash within quoted fields (required for PostgreSQL)
+
 ## 2016.12.09 
 ### Added
  - setuid to root. pwalk needs to run as root to collect all file system information.
