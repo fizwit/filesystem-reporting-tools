@@ -164,7 +164,8 @@ void
         cur->THRDid, cur->flag, cur->dname );
 #endif /* THRD_DEBUG */
     if ( (dirp = opendir( cur->dname )) == NULL ) {
-        exit ( 1 );
+      fprintf( stderr, "Locked Dir: %s\n", cur->dname );
+      return;
     }
     /* find the end of fs->name and put '/' at the end <end_dname>
        points to char after '/' */
