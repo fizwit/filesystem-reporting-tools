@@ -32,7 +32,8 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 /* #define THRD_DEBUG */
 
 static char *whoami = "pwalk";
-static char *Version = "2.6.5 Mar 21 2017 st_nlink";
+static char *Version = "2.6.6 April 27 2017 add st_dev";
+//static char *Version = "2.6.5 Mar 21 2017 st_nlink";
 //static char *Version = "2.6.4 Dec 12 2015 John F Dey john@fuzzdog.com";
 //static char *Version = "2.6.3 Dec 9 2015 John F Dey john@fuzzdog.com";
 // static char *Version = "2.6.2 Aug 7 2015 John F Dey john@fuzzdog.com";
@@ -59,23 +60,25 @@ pthread_mutex_t mutexPrintStat;
 
 void
 printVersion( ) {
-   fprintf( stderr, "%s version %s\n", whoami, Version );
-   fprintf( stderr, "%s Copyright (C) 2013 John F Dey\n", whoami ); 
-   fprintf( stderr, "pwalk comes with ABSOLUTELY NO WARRANTY;\n" );
-   fprintf( stderr, "This is free software, you can redistribute it and/or\n");
-   fprintf( stderr, "modify it under the terms of the GNU General Public License\n" );
-   fprintf( stderr, "as published by the Free Software Foundation; either version 2\n" );
-   fprintf( stderr, "of the License, or (at your option) any later version.\n" );
+   fprintf(stderr, "%s version %s\n", whoami, Version );
+   fprintf(stderr, "%s Copyright (C) 2013 John F Dey\n", whoami ); 
+   fprintf(stderr, "pwalk comes with ABSOLUTELY NO WARRANTY;\n" );
+   fprintf(stderr, "This is free software, you can redistribute it and/or\n");
+   fprintf(stderr, "modify it under the terms of the GNU General Public License\n" );
+   fprintf(stderr, "as published by the Free Software Foundation; either version 2\n" );
+   fprintf(stderr, "of the License, or (at your option) any later version.\n" );
 }
 
 void
 printHelp( ) {
-   fprintf( stderr, "Useage : %s (fully qualified file name)\n", whoami); 
-   fprintf( stderr, "Flags: --help --version \n" );
-   fprintf( stderr, "       --NoSnap Ignore directories with name .snapshot\n");
-   fprintf( stderr, "output format: CSV\n" );
-   fprintf( stderr, "fields : inode,parent-inode,directory-depth,\"filename\",\"fileExtension\",UID,GID,st_size,st_blocks\"," );
-   fprintf( stderr, "st_nlink,\"st_mode\",atime,mtime,ctime,count(files),sum(size)\n");
+   fprintf(stderr, "Useage : %s (fully qualified file name)\n", whoami); 
+   fprintf(stderr, "Flags: --help --version \n" );
+   fprintf(stderr, "       --NoSnap Ignore directories with name .snapshot\n");
+   fprintf(stderr, "output format: CSV\n" );
+   fprintf(stderr, "fields : inode,parent-inode,directory-depth,\"filename\"");
+   fprintf(stderr, ",\"fileExtension\",UID,GID,st_size,st_dev,st_blocks\"" );
+   fprintf(stderr, ",st_nlink,\"st_mode\",atime,mtime,ctime,count(files)");
+   fprintf(stderr, ",sum(size)\n");
 }
 
 /* Escape CSV delimeters */
@@ -122,13 +125,14 @@ printStat( struct threadData *cur, char *exten, struct stat *f,
       ino = f->st_ino; pino = cur->pinode; depth = cur->depth - 1;}
    else {  /* Not a directory */
       ino = f->st_ino; pino = cur->pstat.st_ino; depth = cur->depth; }
-   sprintf ( out, "%ld,%ld,%ld,\"%s\",\"%s\",%ld,%ld,%ld,%ld,%d,\"%07o\",%ld,%ld,%ld,%ld,%ld\n",
-    ino, pino, depth,
-    fname, exten_csv, (long)f->st_uid,
-    (long)f->st_gid, (long)f->st_size, (long)f->st_blocks, (int)f->st_nlink,
-    (int)f->st_mode,
-    (long)f->st_atime, (long)f->st_mtime, (long)f->st_ctime, 
-    fileCnt, dirSz );
+   sprintf ( out, "%ld,%ld,%ld,\"%s\",\"%s\",%ld,%ld,%ld,%ld,%ld,%d,\"%07o\",%ld,%ld,%ld,%ld,%ld\n",
+            ino, pino, depth,
+            fname, exten_csv, (long)f->st_uid,
+            (long)f->st_gid, (long)f->st_size, (long)f->st_dev,
+            (long)f->st_blocks, (int)f->st_nlink,
+            (int)f->st_mode,
+            (long)f->st_atime, (long)f->st_mtime, (long)f->st_ctime, 
+            fileCnt, dirSz );
     fputs( out, stdout );
 }
 
