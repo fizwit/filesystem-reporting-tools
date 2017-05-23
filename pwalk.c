@@ -90,8 +90,8 @@ csv_escape(char *in, char *out)
 
    t = out;
    while ( *in ) {
-      if ( *in == '"' || *in == ',' || *in == '\\')
-         *out++ = '\\';
+      if ( *in == '"' )
+         *out++ = '"';
       if ( *in < 32 ) {
          in++;
          cnt++;
@@ -169,7 +169,7 @@ void
 #endif /* THRD_DEBUG */
     if ( (dirp = opendir( cur->dname )) == NULL ) {
       fprintf( stderr, "Locked Dir: %s\n", cur->dname );
-      return;
+      return arg;
     }
     /* find the end of fs->name and put '/' at the end <end_dname>
        points to char after '/' */
