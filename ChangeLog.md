@@ -1,6 +1,13 @@
 # Change Log
 All notable changes to pwalk will be documented in this file.
 
+## 2017.05.31 
+### Feature 
+ - Add feature to exclude directories. command line option --exclude filename.
+   filename contains a list of directory names to skip. pwalk can be used with
+   relative and absolute paths.  Be sure to use the correct form of the path
+   to exclude directories.
+
 ## 2016.12.12
 ### Fixes
  - pwalk escapes properly on filename, but not extension:

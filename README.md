@@ -71,6 +71,17 @@ the root user is not a good practice.  I run pwalk from a system only used by
 administrative staff.  The NFS file systems to be reported on by pwalk are
 exported read only to the admin machine.
 
+### Options
+--NoSnap  Ignore directories that match the name .snapshot.
+
+--exclude file, Exclude expects a single argument which is the name of a file.
+  The exclude file contains paths of directories to skip. One path per line.
+  pwalk will run with absolute or relative paths. The format of the pathnames
+  in the exclude file should match the output of pwalk.
+
+Exclude expects a single argument which is the name of a file.
+The exlude file contains paths of directories 
+
 ### Reporting ###
 SQL allows you to look at file systems differently and more efficiently than 
 just browsing a file system by hand.  As an example: How many files have been

@@ -32,13 +32,13 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 /* #define THRD_DEBUG */
 
 static char *whoami = "pwalk";
-static char *Version = "2.6.5 May 31 2017 John F Dey john@fuzzdog.com";
+static char *Version = "2.6.7 May 31 2017 John F Dey john@fuzzdog.com";  // exclude feature
 // static char *Version = "2.6.4 Dec 12 2015 John F Dey john@fuzzdog.com";
 // static char *Version = "2.6.3 Dec 9 2015 John F Dey john@fuzzdog.com";
 // static char *Version = "2.6.2 Aug 7 2015 John F Dey john@fuzzdog.com";
 
 #define MAXEXFILES 512
-static char *exclude_list[MAXEXFILES];
+char *exclude_list[MAXEXFILES];
 
 int SNAPSHOT =0; /* if set ignore directories called .snapshot */
 
@@ -60,36 +60,34 @@ struct threadData tdslot[MAXTHRDS];
 pthread_mutex_t mutexFD;
 pthread_mutex_t mutexPrintStat;
 
+int check_exclude_list(char *fname);
+void verify_paths(char *list[]);
+void get_exclude_list(char *fname, char *list[]);
+
 void
 printVersion( ) {
    fprintf(stderr, "%s version %s\n", whoami, Version );
    fprintf(stderr, "%s Copyright (C) 2013 John F Dey\n", whoami ); 
    fprintf(stderr, "pwalk comes with ABSOLUTELY NO WARRANTY;\n" );
    fprintf(stderr, "This is free software, you can redistribute it and/or\n");
-   fprintf(stderr, "modify it under the terms of the GNU General Public License\n" );
-   fprintf(stderr, "as published by the Free Software Foundation; either version 2\n" );
-   fprintf(stderr, "of the License, or (at your option) any later version.\n" );
+   fprintf(stderr, "modify it under the\nterms of the GNU General Public");
+   fprintf(stderr, " License as published by the Free Software Foundation;\n");
+   fprintf(stderr, "either version 2 of the License, or (at your option) any");
+   fprintf(stderr, " later version.\n" );
 }
 
 void
 printHelp( ) {
-<<<<<<< HEAD
-   fprintf( stderr, "Useage : %s (fully qualified file name)\n", whoami); 
-   fprintf( stderr, "Flags: --help --version \n" );
-   fprintf( stderr, "       --NoSnap Ignore directories with name .snapshot\n");
-   fprintf( stderr, "output format: CSV\n" );
-   fprintf( stderr, "fields : inode,parent-inode,directory-depth,\"filename\",\"fileExtension\",UID,GID,st_size,st_blocks\"," );
-   fprintf( stderr, "st_nlink,\"st_mode\",atime,mtime,ctime,count(files),sum(size)\n");
-=======
    fprintf(stderr, "Useage : %s (fully qualified file name)\n", whoami); 
    fprintf(stderr, "Flags: --help --version \n" );
    fprintf(stderr, "       --NoSnap Ignore directories with name .snapshot\n");
+   fprintf(stderr, "       --exclude filename  Filename contains a list of");
+   fprintf(stderr, " directories to exclude from reporting\n");
    fprintf(stderr, "output format: CSV\n" );
    fprintf(stderr, "fields : inode,parent-inode,directory-depth,\"filename\"");
    fprintf(stderr, ",\"fileExtension\",UID,GID,st_size,st_dev,st_blocks\"" );
    fprintf(stderr, ",st_nlink,\"st_mode\",atime,mtime,ctime,count(files)");
    fprintf(stderr, ",sum(size)\n");
->>>>>>> 13878315797fabb5c381b35fa312e5b4ab87dc95
 }
 
 /* Escape CSV delimeters */
@@ -136,15 +134,6 @@ printStat( struct threadData *cur, char *exten, struct stat *f,
       ino = f->st_ino; pino = cur->pinode; depth = cur->depth - 1;}
    else {  /* Not a directory */
       ino = f->st_ino; pino = cur->pstat.st_ino; depth = cur->depth; }
-<<<<<<< HEAD
-   sprintf ( out, "%ld,%ld,%ld,\"%s\",\"%s\",%ld,%ld,%ld,%ld,%d,%d\"%07o\",%ld,%ld,%ld,%ld,%ld\n",
-    ino, pino, depth,
-    fname, exten_csv, (long)f->st_uid,
-    (long)f->st_gid, (long)f->st_size, (long)f->st_blocks, (int)f->st_nlink,
-    (int)f->st_mode,
-    (long)f->st_atime, (long)f->st_mtime, (long)f->st_ctime, 
-    fileCnt, dirSz );
-=======
    sprintf ( out, "%ld,%ld,%ld,\"%s\",\"%s\",%ld,%ld,%ld,%ld,%ld,%d,\"%07o\",%ld,%ld,%ld,%ld,%ld\n",
             ino, pino, depth,
             fname, exten_csv, (long)f->st_uid,
@@ -153,7 +142,6 @@ printStat( struct threadData *cur, char *exten, struct stat *f,
             (int)f->st_mode,
             (long)f->st_atime, (long)f->st_mtime, (long)f->st_ctime, 
             fileCnt, dirSz );
->>>>>>> 13878315797fabb5c381b35fa312e5b4ab87dc95
     fputs( out, stdout );
 }
 
@@ -175,7 +163,7 @@ void
 *fileDir( void *arg ) 
 {
     char *s, *t, *u, *dot, *end_dname;
-    int  slot, status;
+    int  i, slot, status;
     DIR *dirp;
     long localCnt =0; /* number of files in a specific directory */
     long localSz  =0; /* byte cnt of files in the local directory 2010.07 */
@@ -189,8 +177,8 @@ void
         cur->THRDid, cur->flag, cur->dname );
 #endif /* THRD_DEBUG */
     if ( (dirp = opendir( cur->dname )) == NULL ) {
-      fprintf( stderr, "Locked Dir: %s\n", cur->dname );
-      return arg;
+        fprintf( stderr, "Locked Dir: %s\n", cur->dname );
+        return arg;
     }
     /* find the end of fs->name and put '/' at the end <end_dname>
        points to char after '/' */
@@ -213,9 +201,10 @@ void
         /* Follow Sub dirs recursivly but don't follow links */
         localSz += f.st_size;
         if ( S_ISDIR(f.st_mode) ) {
-            if ( SNAPSHOT && !strcmp( ".snapshot", d->d_name ) ) {
-               continue; /* next file from raddir */
-            }
+            if ( SNAPSHOT && !strcmp( ".snapshot", d->d_name ) )
+               continue; /* next file from readdir */
+            if ( exclude_list[0] && check_exclude_list(cur->dname) )
+                    continue;
             pthread_mutex_lock (&mutexFD);
             if ( ThreadCNT < MAXTHRDS ) {
                 slot = 0;
@@ -305,18 +294,20 @@ main( int argc, char* argv[] )
         printHelp( ); 
         exit( EXIT_FAILURE );
     }
+    exclude_list[0] = NULL;
     argc--; argv++; 
     while ( argc > 0 && *argv[0] == '-' ) {
         if ( !strcmp(*argv, "--NoSnap" ) )
            SNAPSHOT = 1; 
-        if ( !strcmp(*argv, "--help" ) )
+        if ( !strcmp(*argv, "--help" ) ) {
            printHelp( );
+           exit(0); }
         if ( !strcmp(*argv, "--version" ) || !strcmp( *argv, "-v" ) ) 
            printVersion( );
         if ( !strcmp(*argv, "--exclude" )) {
-           get_exclude_paths(argv++, exclude_list);
-           verify_paths(exclude_list);
-        }
+           argv++;
+           get_exclude_list(*argv, exclude_list);
+           verify_paths(exclude_list); }
         argc--; argv++;
     }
     if ( argc == 0 ) {

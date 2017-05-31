@@ -2,27 +2,19 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <sys/types.h>
-#include <strings.h>
+#include <string.h>
 #include <sys/stat.h>
 
-/*
- *  *  Case-insensitive substring search for <b> within <a>
- *   */
-char
-ss( char *a, char *b )
-{
-    register char *A=a, *B, c= ~040;
+extern char *exclude_list[512];
 
-    do {
-        B=b;
-        while (*A && (*A^*B)&c)
-            A++;
-        while (*A && *B && !((*A^*B)&c)) {
-            A++;
-            B++;
-        }
-    }  while (*A && *B && (*A^*B)&c);
-    return (!*B);
+int
+check_exclude_list(char *fname)
+{
+    int i =0;
+    while(exclude_list[i])
+       if ( !strcmp(exclude_list[i++], fname))
+           return 1;
+    return 0;
 }
 
 void
