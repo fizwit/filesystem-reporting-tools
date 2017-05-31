@@ -60,6 +60,10 @@ file is not a directory.  All file and directory sizes are
 reported in bytes. Symbolic links are reported (they are a file) but symbolic
 links are never followed.
 
+April 27, 2017; st_dev has been added to the output. st_dev will allow tracking 
+of file system volume.  This might lead to a new command line option
+to prevent crossing of mounted file systems. Similar to find -x.
+
 ### Usage ###
 Pwalk takes a single argument, which is the name of the file system to report
 on.  In practice pwalk should be run as root or as setuid. Exposing NFS to 
