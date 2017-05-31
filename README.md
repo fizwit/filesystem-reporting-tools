@@ -75,10 +75,10 @@ exported read only to the admin machine.
 
     --NoSnap  Ignore directories that match the name .snapshot.
 
-    --exclude file
+    --exclude filename
 
 Exclude expects a single argument which is the name of a file.
-  The exclude file contains paths of directories to skip. One path per line.
+  The exclude file contains paths of directories to skip, one path per line.
   pwalk will run with absolute or relative paths. The format of the pathnames
   in the exclude file should match the output of pwalk.
 
