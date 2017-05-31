@@ -14,7 +14,7 @@ Installing the 'lib32gcc1' package to Ubuntu provides all the libraries and
 tools necessary to build pwalk. To build pwalk just compile pwalk.c. This one
 gcc command is that is needed.
 
-	gcc -pthread pwalk.c -o pwalk
+	gcc -pthread pwalk.c exclude.c -o pwalk
 
 ### Purpose ###
 pwalk was written to solve the problem of reporting disk usage for large file 
@@ -72,15 +72,15 @@ administrative staff.  The NFS file systems to be reported on by pwalk are
 exported read only to the admin machine.
 
 ### Options
---NoSnap  Ignore directories that match the name .snapshot.
 
---exclude file, Exclude expects a single argument which is the name of a file.
+    --NoSnap  Ignore directories that match the name .snapshot.
+
+    --exclude file
+
+Exclude expects a single argument which is the name of a file.
   The exclude file contains paths of directories to skip. One path per line.
   pwalk will run with absolute or relative paths. The format of the pathnames
   in the exclude file should match the output of pwalk.
-
-Exclude expects a single argument which is the name of a file.
-The exlude file contains paths of directories 
 
 ### Reporting ###
 SQL allows you to look at file systems differently and more efficiently than 
