@@ -85,7 +85,7 @@ printHelp( ) {
    fprintf(stderr, " directories to exclude from reporting\n");
    fprintf(stderr, "output format: CSV\n" );
    fprintf(stderr, "fields : inode,parent-inode,directory-depth,\"filename\"");
-   fprintf(stderr, ",\"fileExtension\",UID,GID,st_size,st_dev,st_blocks\"" );
+   fprintf(stderr, ",\"fileExtension\",UID,GID,st_size,st_dev,st_blocks" );
    fprintf(stderr, ",st_nlink,\"st_mode\",atime,mtime,ctime,count(files)");
    fprintf(stderr, ",sum(size)\n");
 }
