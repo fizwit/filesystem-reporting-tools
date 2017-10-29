@@ -80,13 +80,14 @@ void
 printHelp( ) {
    fprintf(stderr, "Useage : %s (fully qualified file name)\n", whoami); 
    fprintf(stderr, "Flags: --help --version \n" );
+   fprintf(stderr, "       --depth n Stop walking when (n) depth is reached\n"); 
    fprintf(stderr, "       --NoSnap Ignore directories with name .snapshot\n");
    fprintf(stderr, "       --exclude filename  Filename contains a list of");
    fprintf(stderr, " directories to exclude from reporting\n");
-   fprintf(stderr, "output format: CSV\n" );
-   fprintf(stderr, "fields : inode,parent-inode,directory-depth,\"filename\"");
-   fprintf(stderr, ",\"fileExtension\",UID,GID,st_size,st_dev,st_blocks\"" );
-   fprintf(stderr, ",st_nlink,\"st_mode\",atime,mtime,ctime,count(files)");
+   fprintf(stderr, "Output is format as CSV. Field hearders:\n" );
+   fprintf(stderr, "inode,parent-inode,directory-depth,\"filename\"");
+   fprintf(stderr, ",\"fileExtension\",UID,GID,st_size,st_dev,st_blocks");
+   fprintf(stderr, ",st_nlink,st_mode,atime,mtime,ctime,count(files)");
    fprintf(stderr, ",sum(size)\n");
 }
 
