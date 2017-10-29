@@ -75,7 +75,7 @@ printVersion( ) {
    fprintf(stderr, "modify it under the\nterms of the GNU General Public");
    fprintf(stderr, " License as published by the Free Software Foundation;\n");
    fprintf(stderr, "either version 2 of the License, or (at your option) any");
-   fprintf(stderr, " later version.\n" );
+   fprintf(stderr, " later version.\n\n" );
 }
 
 void
@@ -85,7 +85,6 @@ printHelp( ) {
    fprintf(stderr, "       --depth n Stop walking when (n) depth is reached\n"); 
    fprintf(stderr, "       --NoSnap Ignore directories with name .snapshot\n");
    fprintf(stderr, "       --exclude filename  Filename contains a list of");
-   fprintf(stderr, "       --depth n  stop walking at directory depth n");
    fprintf(stderr, " directories to exclude from reporting\n");
    fprintf(stderr, "Output is format as CSV. Field hearders:\n" );
    fprintf(stderr, "inode,parent-inode,directory-depth,\"filename\"");
