@@ -127,7 +127,8 @@ printStat( struct threadData *cur, char *exten, struct stat *f,
    char out[FILENAME_MAX+FILENAME_MAX];
    char fname[FILENAME_MAX];
    char exten_csv[FILENAME_MAX];
-   long ino, pino, depth;
+   unsigned long long int ino;
+   long pino, depth;
 
    csv_escape(cur->dname, fname);
    if ( exten )
@@ -138,7 +139,7 @@ printStat( struct threadData *cur, char *exten, struct stat *f,
       ino = f->st_ino; pino = cur->pinode; depth = cur->depth - 1;}
    else {  /* Not a directory */
       ino = f->st_ino; pino = cur->pstat.st_ino; depth = cur->depth; }
-   sprintf ( out, "%ld,%ld,%ld,\"%s\",\"%s\",%ld,%ld,%ld,%ld,%ld,%d,\"%07o\",%ld,%ld,%ld,%ld,%ld\n",
+   sprintf ( out, "%llu,%ld,%ld,\"%s\",\"%s\",%ld,%ld,%ld,%ld,%ld,%d,\"%07o\",%ld,%ld,%ld,%ld,%ld\n",
             ino, pino, depth,
             fname, exten_csv, (long)f->st_uid,
             (long)f->st_gid, (long)f->st_size, (long)f->st_dev,
