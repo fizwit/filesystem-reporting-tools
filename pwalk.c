@@ -32,7 +32,8 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 /* #define THRD_DEBUG */
 
 static char *whoami = "pwalk";
-static char *Version = "2.6.7 May 31 2017 John F Dey john@fuzzdog.com";  // exclude feature
+static char *Version = "2.6.8 Oct 27 2017 John F Dey john@fuzzdog.com";  // depth feature
+//static char *Version = "2.6.7 May 31 2017 John F Dey john@fuzzdog.com";  // exclude feature
 // static char *Version = "2.6.4 Dec 12 2015 John F Dey john@fuzzdog.com";
 // static char *Version = "2.6.3 Dec 9 2015 John F Dey john@fuzzdog.com";
 // static char *Version = "2.6.2 Aug 7 2015 John F Dey john@fuzzdog.com";
@@ -41,6 +42,7 @@ static char *Version = "2.6.7 May 31 2017 John F Dey john@fuzzdog.com";  // excl
 char *exclude_list[MAXEXFILES];
 
 int SNAPSHOT =0; /* if set ignore directories called .snapshot */
+int DEPTH = 0; /* if set do not traverse beyond directory depth */
 
 struct threadData {
     char dname[FILENAME_MAX+1]; /* full path and basename */
@@ -73,13 +75,14 @@ printVersion( ) {
    fprintf(stderr, "modify it under the\nterms of the GNU General Public");
    fprintf(stderr, " License as published by the Free Software Foundation;\n");
    fprintf(stderr, "either version 2 of the License, or (at your option) any");
-   fprintf(stderr, " later version.\n" );
+   fprintf(stderr, " later version.\n\n" );
 }
 
 void
 printHelp( ) {
    fprintf(stderr, "Useage : %s (fully qualified file name)\n", whoami); 
    fprintf(stderr, "Flags: --help --version \n" );
+   fprintf(stderr, "       --depth n Stop walking when (n) depth is reached\n"); 
    fprintf(stderr, "       --NoSnap Ignore directories with name .snapshot\n");
    fprintf(stderr, "       --exclude filename  Filename contains a list of");
    fprintf(stderr, " directories to exclude from reporting\n");
@@ -94,22 +97,23 @@ printHelp( ) {
 void
 csv_escape(char *in, char *out)
 {
-   char *t;
+   char *t, *orig;
    int cnt = 0;
 
    t = out;
+   orig = in;
    while ( *in ) {
       if ( *in == '"' )
-         *out++ = '"';
-      if ( *in < 32 ) {
-         in++;
-         cnt++;
+          *out++ = '"';
+      if ( (unsigned char)*in < 32 ) {
+          in++;
+          cnt++;
       } else
-         *out++ = *in++;
+          *out++ = *in++;
    *out = '\0';
    }
    if ( cnt )
-      fprintf( stderr, "Bad File: %s\n", t);
+       fprintf( stderr, "Bad File: %s\n", orig);
 }
 
 /*
@@ -123,7 +127,8 @@ printStat( struct threadData *cur, char *exten, struct stat *f,
    char out[FILENAME_MAX+FILENAME_MAX];
    char fname[FILENAME_MAX];
    char exten_csv[FILENAME_MAX];
-   long ino, pino, depth;
+   unsigned long long int ino;
+   long pino, depth;
 
    csv_escape(cur->dname, fname);
    if ( exten )
@@ -134,7 +139,7 @@ printStat( struct threadData *cur, char *exten, struct stat *f,
       ino = f->st_ino; pino = cur->pinode; depth = cur->depth - 1;}
    else {  /* Not a directory */
       ino = f->st_ino; pino = cur->pstat.st_ino; depth = cur->depth; }
-   sprintf ( out, "%ld,%ld,%ld,\"%s\",\"%s\",%ld,%ld,%ld,%ld,%ld,%d,\"%07o\",%ld,%ld,%ld,%ld,%ld\n",
+   sprintf ( out, "%llu,%ld,%ld,\"%s\",\"%s\",%ld,%ld,%ld,%ld,%ld,%d,\"%07o\",%ld,%ld,%ld,%ld,%ld\n",
             ino, pino, depth,
             fname, exten_csv, (long)f->st_uid,
             (long)f->st_gid, (long)f->st_size, (long)f->st_dev,
@@ -203,6 +208,8 @@ void
         if ( S_ISDIR(f.st_mode) ) {
             if ( SNAPSHOT && !strcmp( ".snapshot", d->d_name ) )
                continue; /* next file from readdir */
+            if ( DEPTH && DEPTH == cur->depth )
+               continue; /* don't do any deeper than this */
             if ( exclude_list[0] && check_exclude_list(cur->dname) )
                     continue;
             pthread_mutex_lock (&mutexFD);
@@ -299,13 +306,17 @@ main( int argc, char* argv[] )
     while ( argc > 0 && *argv[0] == '-' ) {
         if ( !strcmp(*argv, "--NoSnap" ) )
            SNAPSHOT = 1; 
+        if ( !strcmp(*argv, "--depth" ) ) {
+           argc--; argv++;
+           DEPTH = atoi(*argv);
+        }
         if ( !strcmp(*argv, "--help" ) ) {
            printHelp( );
            exit(0); }
         if ( !strcmp(*argv, "--version" ) || !strcmp( *argv, "-v" ) ) 
            printVersion( );
         if ( !strcmp(*argv, "--exclude" )) {
-           argv++;
+           argc--; argv++;
            get_exclude_list(*argv, exclude_list);
            verify_paths(exclude_list); }
         argc--; argv++;
