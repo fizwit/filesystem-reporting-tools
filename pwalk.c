@@ -32,8 +32,10 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 /* #define THRD_DEBUG */
 
 static char *whoami = "pwalk";
-static char *Version = "2.6.8 Oct 27 2017 John F Dey john@fuzzdog.com";  // depth feature
-//static char *Version = "2.6.7 May 31 2017 John F Dey john@fuzzdog.com";  // exclude feature
+// Add header to to CSV as option
+static char *Version = "2.6.9 Oct 27 2018 John F Dey john@fuzzdog.com";
+// 2.6.8 Oct 27 2017 depth feature
+// 2.6.7 May 31 2017 exclude feature
 // static char *Version = "2.6.4 Dec 12 2015 John F Dey john@fuzzdog.com";
 // static char *Version = "2.6.3 Dec 9 2015 John F Dey john@fuzzdog.com";
 // static char *Version = "2.6.2 Aug 7 2015 John F Dey john@fuzzdog.com";
