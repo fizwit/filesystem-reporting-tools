@@ -79,18 +79,37 @@ printVersion( ) {
 }
 
 void
-printHelp( ) {
-   fprintf(stderr, "Useage : %s (fully qualified file name)\n", whoami); 
-   fprintf(stderr, "Flags: --help --version \n" );
-   fprintf(stderr, "       --depth n Stop walking when (n) depth is reached\n"); 
-   fprintf(stderr, "       --NoSnap Ignore directories with name .snapshot\n");
-   fprintf(stderr, "       --exclude filename  Filename contains a list of");
-   fprintf(stderr, " directories to exclude from reporting\n");
-   fprintf(stderr, "output format: CSV\n" );
-   fprintf(stderr, "fields : inode,parent-inode,directory-depth,\"filename\"");
-   fprintf(stderr, ",\"fileExtension\",UID,GID,st_size,st_dev,st_blocks" );
-   fprintf(stderr, ",st_nlink,\"st_mode\",atime,mtime,ctime,count(files)");
-   fprintf(stderr, ",sum(size)\n");
+printHeader()
+{
+   printf("inode,parent-inode,directory-depth,\"filename\"");
+   printf(",\"fileExtension\",UID,GID,st_size,st_dev,st_blocks" );
+   printf(",st_nlink,\"st_mode\",st_atime,st_mtime,st_ctime,pw_fcount");
+   printf(",pw_dirsum\n");
+}
+
+void
+printHelp()
+{
+   printf("Useage : %s (fully qualified file name)\n", whoami); 
+   printf("Flags: --help --version \n" );
+   printf("       --depth n Stop walking when (n) depth is reached\n"); 
+   printf("       --NoSnap Ignore directories with name .snapshot\n");
+   printf("       --exclude filename <file> contains a list of");
+   printf(" directories \n");
+   printf("         to exclude from reporting\n");
+   printf("       --header write CSV header with output\n\n"); 
+   printf("Each line of output represents one file. st_* fields are direct ");
+   printf("from the inode\ndata structure. pwalk provides additional ");
+   printf("data for directories.\n\n");
+   printf(" - directory-depth: Values are incremented by directory depth. ");
+   printf("Initial root\n   directory has value of -1. ");
+   printf("Files in the root directory have value 0.\n");
+   printf(" - pw_fcount: Number of files in a directory. Value is -1 ");
+   printf("if file is not a directory\n" );
+   printf(" - pw_dirsum: Sum of file sizes in single directory. Value ");
+   printf("of -1 if\n   file is not a directory\n\n");
+   printf("File Header:\n");
+   printHeader();
 }
 
 /* Escape CSV delimeters */
@@ -315,6 +334,8 @@ main( int argc, char* argv[] )
            exit(0); }
         if ( !strcmp(*argv, "--version" ) || !strcmp( *argv, "-v" ) ) 
            printVersion( );
+        if ( !strcmp(*argv, "--header" ) || !strcmp( *argv, "-v" ) ) 
+           printHeader();
         if ( !strcmp(*argv, "--exclude" )) {
            argc--; argv++;
            get_exclude_list(*argv, exclude_list);
