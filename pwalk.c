@@ -45,6 +45,8 @@ char *exclude_list[MAXEXFILES];
 
 int SNAPSHOT =0; /* if set ignore directories called .snapshot */
 int DEPTH = 0; /* if set do not traverse beyond directory depth */
+int ONE_FS =0; /* skip directories on different file systems -x */
+dev_t ST_DEV;  /* save st_dev of root file */
 
 struct threadData {
     char dname[FILENAME_MAX+1]; /* full path and basename */
@@ -99,6 +101,8 @@ printHelp()
    printf("       --exclude filename <file> contains a list of");
    printf(" directories \n");
    printf("         to exclude from reporting\n");
+   printf("       --one-file-system skip directories on different file");
+   printf(" systems\n");
    printf("       --header write CSV header with output\n\n"); 
    printf("Each line of output represents one file. st_* fields are direct ");
    printf("from the inode\ndata structure. pwalk provides additional ");
@@ -224,6 +228,9 @@ void
               cur->THRDid, cur->flag, cur->dname );
             continue;
         } 
+        /* don't report data from foreign file systems */
+        if ( ONE_FS && f.st_dev != ST_DEV ) 
+            continue;
         /* Follow Sub dirs recursivly but don't follow links */
         localSz += f.st_size;
         if ( S_ISDIR(f.st_mode) ) {
@@ -316,7 +323,7 @@ main( int argc, char* argv[] )
 {
     int error, i;
     char *s, *c;
-    struct stat f;
+    struct stat root;
 
     if ( argc < 2 ) {
         printHelp( ); 
@@ -334,14 +341,16 @@ main( int argc, char* argv[] )
         if ( !strcmp(*argv, "--help" ) ) {
            printHelp( );
            exit(0); }
-        if ( !strcmp(*argv, "--version" ) || !strcmp( *argv, "-v" ) ) 
+        if ( !strcmp(*argv, "--version" ) || !strcmp(*argv, "-v") ) 
            printVersion( );
-        if ( !strcmp(*argv, "--header" ) || !strcmp( *argv, "-v" ) ) 
+        if ( !strcmp(*argv, "--header" ) || !strcmp(*argv, "-v") ) 
            printHeader();
         if ( !strcmp(*argv, "--exclude" )) {
            argc--; argv++;
            get_exclude_list(*argv, exclude_list);
            verify_paths(exclude_list); }
+        if ( !strcmp(*argv, "--one-file-system" ) || !strcmp(*argv, "-x") )
+           ONE_FS = 1; 
         argc--; argv++;
     }
     if ( argc == 0 ) {
@@ -366,11 +375,12 @@ main( int argc, char* argv[] )
     pthread_mutex_init(&mutexPrintStat, NULL);
 
     strcpy( tdslot[0].dname, (const char*) *argv );
-    if ( lstat( *argv, &f ) == -1 ) {
+    if ( lstat( *argv, &root ) == -1 ) {
         perror( "lstat: " ); 
         exit( 1 ); 
     }
-    memcpy( &tdslot[0].pstat, &f, sizeof( struct stat ) );
+    ST_DEV = root.st_dev;
+    memcpy( &tdslot[0].pstat, &root, sizeof( struct stat ) );
     tdslot[0].THRDid = totalTHRDS++; /* first thread is zero */
     tdslot[0].flag = 0;
     tdslot[0].depth = 0;

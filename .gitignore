@@ -2,4 +2,5 @@ pwalk
 a.out
 test.lst
 test
+output*
 *.o
