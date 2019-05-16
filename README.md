@@ -112,9 +112,18 @@ perform about 8,000 to 30,000 stat commands per second.
 Example performance metric: 50,000,000 files at a rate of 20,000 stats per
 second should take about 41 minutes to complete. 
 
+### Reporting Tools ###
+Robert McDermott has written the [pwalk_reporter](https://github.com/robert-mcdermott/pwalk_reporter) utility takes the output from the pwalk utility and provides summary statistics about the filesystem.
+
+It provides the following summary statistics:
+
+ * Total file count and total file size of the filesystem
+ * A histogram of file ages broken down by file count and size in a fixed set of bins. The histogram can use either 'mtime' (default) or 'atime' I plan to make the histogram bins either automatic or provide the ability to specify them in a future release.
+ * The top 100 file types by total size
+ * The top 100 largest directories by size
+
 ### Author ###
 Pwalk is written by John Dey.  I have been a UNIX/Linux administrator since
 the days of VAXes and BSD 4.2.  I have been privileged to support scientific
 researchers and their data since the mid 1990’s.  I hope you will find pwalk 
-to be useful. 
-
+to be useful.
