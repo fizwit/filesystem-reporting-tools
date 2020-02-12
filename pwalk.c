@@ -28,12 +28,15 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <errno.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <stdint.h>
 
 /* #define THRD_DEBUG */
 
 static char *whoami = "pwalk";
-// Add header to to CSV as option
-static char *Version = "2.6.9 Oct 27 2018 John F Dey john@fuzzdog.com";
+static char *Version = "2.6.10 Feb 11 2020 John F Dey john@fuzzdog.com";
+// 2.6.10 pino used wrong type, improve error message for lstat
+//        improve output format for inodes
+// 2.6.9 Oct 27 2018 Add header to to CSV as option
 // 2.6.8 Oct 27 2017 depth feature
 // 2.6.7 May 31 2017 exclude feature
 // static char *Version = "2.6.4 Dec 12 2015 John F Dey john@fuzzdog.com";
@@ -50,7 +53,7 @@ dev_t ST_DEV;  /* save st_dev of root file */
 
 struct threadData {
     char dname[FILENAME_MAX+1]; /* full path and basename */
-    long pinode;                /* Parent Inode */
+    ino_t pinode;               /* Parent Inode */
     long depth;                 /* directory depth */
     long THRDid;                /* unique ID increaments with each new THRD */
     int  flag;                  /* 0 if thread; recursion > 0 */
@@ -152,8 +155,8 @@ printStat( struct threadData *cur, char *exten, struct stat *f,
    char out[FILENAME_MAX+FILENAME_MAX];
    char fname[FILENAME_MAX];
    char exten_csv[FILENAME_MAX];
-   unsigned long long int ino;
-   long pino, depth;
+   ino_t ino, pino;
+   long depth;
 
    csv_escape(cur->dname, fname);
    if ( exten )
@@ -164,8 +167,8 @@ printStat( struct threadData *cur, char *exten, struct stat *f,
       ino = f->st_ino; pino = cur->pinode; depth = cur->depth - 1;}
    else {  /* Not a directory */
       ino = f->st_ino; pino = cur->pstat.st_ino; depth = cur->depth; }
-   sprintf ( out, "%llu,%ld,%ld,\"%s\",\"%s\",%ld,%ld,%ld,%ld,%ld,%d,\"%07o\",%ld,%ld,%ld,%ld,%ld\n",
-            ino, pino, depth,
+   sprintf ( out, "%ju,%ju,%ld,\"%s\",\"%s\",%ld,%ld,%ld,%ld,%ld,%d,\"%07o\",%ld,%ld,%ld,%ld,%ld\n",
+            (uintmax_t)ino, (uintmax_t)pino, depth,
             fname, exten_csv, (long)f->st_uid,
             (long)f->st_gid, (long)f->st_size, (long)f->st_dev,
             (long)f->st_blocks, (int)f->st_nlink,
@@ -222,14 +225,14 @@ void
         s = d->d_name; t = end_dname;
         while ( *s )  /* copy file name to end of current path */
             *t++ = *s++;
-        *t = '\0'; 
+        *t = '\0';
         if ( lstat ( cur->dname, &f ) == -1 ) {
-            fprintf( stderr, "msg=lstat error,threadID=%ld,rdepth=%d,file=%s\n", 
-              cur->THRDid, cur->flag, cur->dname );
+            fprintf( stderr, "threadID=%ld,rdepth=%d lstat: '%s' %s\n",
+              cur->THRDid, cur->flag, strerror(errno), cur->dname);
             continue;
-        } 
+        }
         /* don't report data from foreign file systems */
-        if ( ONE_FS && f.st_dev != ST_DEV ) 
+        if ( ONE_FS && f.st_dev != ST_DEV )
             continue;
         /* Follow Sub dirs recursivly but don't follow links */
         localSz += f.st_size;
@@ -246,7 +249,7 @@ void
                 while ( slot < MAXTHRDS ) {
                     if ( tdslot[slot].THRDid == -1 ) {
                         new = &tdslot[slot];
-                        new->THRDid = totalTHRDS++; 
+                        new->THRDid = totalTHRDS++;
                         new->flag = 0;   /* recurse flag reset for new thread */
                         break;
                     }
@@ -376,8 +379,8 @@ main( int argc, char* argv[] )
 
     strcpy( tdslot[0].dname, (const char*) *argv );
     if ( lstat( *argv, &root ) == -1 ) {
-        perror( "lstat: " ); 
-        exit( 1 ); 
+        fprintf( stderr, "lstat: '%s' %s\n", *argv, strerror(errno));
+        exit(errno); 
     }
     ST_DEV = root.st_dev;
     memcpy( &tdslot[0].pstat, &root, sizeof( struct stat ) );
