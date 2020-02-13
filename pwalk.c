@@ -33,7 +33,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 /* #define THRD_DEBUG */
 
 static char *whoami = "pwalk";
-static char *Version = "2.6.10 Feb 11 2020 John F Dey john@fuzzdog.com";
+static char *Version = "2.6.10 Feb 13 2020 John F Dey john@fuzzdog.com";
 // 2.6.10 pino used wrong type, improve error message for lstat
 //        improve output format for inodes
 // 2.6.9 Oct 27 2018 Add header to to CSV as option
