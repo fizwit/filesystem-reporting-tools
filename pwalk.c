@@ -97,7 +97,7 @@ printHeader()
 void
 printHelp()
 {
-   printf("Useage : %s (fully qualified file name)\n", whoami); 
+   printf("Usage : %s (fully qualified file name)\n", whoami); 
    printf("Flags: --help --version \n" );
    printf("       --depth n Stop walking when (n) depth is reached\n"); 
    printf("       --NoSnap Ignore directories with name .snapshot\n");
