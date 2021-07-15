@@ -1,6 +1,22 @@
 # Change Log
 All notable changes to pwalk will be documented in this file.
 
+## 2021.07.14
+ - Add Change Owner feature. File owner is changed conditionally. Two arguments
+   are required; --chown_from and  -chown_to UID:GID. Check everyfile for
+   "chown_from", if True change the owner to "chown_to". 
+ - A parallel file traversal is a valuable tool for managing very large file
+   POSIX file systems. The implementation of the change-owner feature is the
+   first step to make pwalk a general-purpose file operation tool. For each
+   file found in the filesystem, pwalk executes the fileProcess function. The
+   call to fileProcess is a function pointer that can set to new types of file
+   operation functions. Additional file operations are easy to implement via
+   the function pointer to "fileProcess." 
+ 
+## 2020.02.18
+### Fixes
+ - Parent Inode is not correct for Beegfs, change output format for inode
+
 ## 2017.05.31 
 ### Feature 
  - Add feature to exclude directories. command line option --exclude filename.

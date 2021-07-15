@@ -1,7 +1,7 @@
 /*
- *  pwalk.c  Parrallel Walk a file system and report file meta data 
+ *  pwalk.c  Parrallel Walk a file system and report file meta data
 
-Copyright (C) (2013-2016) John F Dey 
+Copyright (C) (2013-2016) John F Dey
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
@@ -18,6 +18,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
  */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,14 +29,20 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <errno.h>
 #include <pthread.h>
 #include <unistd.h>
-#include <stdint.h>
+#include "pwalk.h"
 
 /* #define THRD_DEBUG */
 
 static char *whoami = "pwalk";
-static char *Version = "2.6.10 Feb 13 2020 John F Dey john@fuzzdog.com";
+static char *Version = "3.0.0 Jul 14 2020 John F Dey john@fuzzdog.com";
+
+// 3.0.0 Major feature Change - use a function pointer to call generic file
+//        processing functions. Separate the traversal code from the file
+//        operations code into a new file:  fileProcess.c
+
 // 2.6.10 pino used wrong type, improve error message for lstat
 //        improve output format for inodes
+
 // 2.6.9 Oct 27 2018 Add header to to CSV as option
 // 2.6.8 Oct 27 2017 depth feature
 // 2.6.7 May 31 2017 exclude feature
@@ -51,17 +58,6 @@ int DEPTH = 0; /* if set do not traverse beyond directory depth */
 int ONE_FS =0; /* skip directories on different file systems -x */
 dev_t ST_DEV;  /* save st_dev of root file */
 
-struct threadData {
-    char dname[FILENAME_MAX+1]; /* full path and basename */
-    ino_t pinode;               /* Parent Inode */
-    long depth;                 /* directory depth */
-    long THRDid;                /* unique ID increaments with each new THRD */
-    int  flag;                  /* 0 if thread; recursion > 0 */
-    struct stat pstat;          /* Parent inode stat struct */
-    pthread_t thread_id;        /* system assigned */
-    pthread_attr_t tattr;
-    };
-
 #define MAXTHRDS 32
 int ThreadCNT  = 1; /* ThreadCNT < MAXTHRDS */
 int totalTHRDS =0;
@@ -73,10 +69,36 @@ int check_exclude_list(char *fname);
 void verify_paths(char *list[]);
 void get_exclude_list(char *fname, char *list[]);
 
+/* conditioanally change file ownership --chown_from --chown_to */
+uid_t UID_orig, UID_new;
+gid_t GID_new;
+int chown_flag =0;
+
+/* Process files */
+void
+(*fileProcess)( struct threadData *cur, char *exten, struct stat *f, long, long);
+
+/*
+ * conditionally change file ownership
+ * if file owned by UID_orig chown UID_new:GID_new
+ */
+void
+changeOwner( struct threadData *cur, char *exten, struct stat *f,
+        long fileCnt, /* directory only - count files in directory */
+        long dirSz );  /* directory only - sum of files within directory */
+/*
+ *  printStat this needs to be in a crital secion  (and it is!)
+ */
+void
+printStat( struct threadData *cur, char *exten, struct stat *f,
+        long fileCnt, /* directory only - count files in directory */
+        long dirSz );  /* directory only - sum of files within directory */
+
+
 void
 printVersion( ) {
    fprintf(stderr, "%s version %s\n", whoami, Version );
-   fprintf(stderr, "%s Copyright (C) 2013 John F Dey\n", whoami ); 
+   fprintf(stderr, "%s Copyright (C) 2013 John F Dey\n", whoami );
    fprintf(stderr, "pwalk comes with ABSOLUTELY NO WARRANTY;\n" );
    fprintf(stderr, "This is free software, you can redistribute it and/or\n");
    fprintf(stderr, "modify it under the\nterms of the GNU General Public");
@@ -97,16 +119,19 @@ printHeader()
 void
 printHelp()
 {
-   printf("Useage : %s (fully qualified file name)\n", whoami); 
+   printf("Useage : %s (fully qualified file name)\n", whoami);
    printf("Flags: --help --version \n" );
-   printf("       --depth n Stop walking when (n) depth is reached\n"); 
+   printf("       --depth n Stop walking when (n) depth is reached\n");
    printf("       --NoSnap Ignore directories with name .snapshot\n");
    printf("       --exclude filename <file> contains a list of");
    printf(" directories \n");
    printf("         to exclude from reporting\n");
    printf("       --one-file-system skip directories on different file");
    printf(" systems\n");
-   printf("       --header write CSV header with output\n\n"); 
+   printf("       --header write CSV header with output\n");
+   printf("Conditionally Change File Owner. Two Flags are required.\n");
+   printf("       --chown_from UID\n");
+   printf("       --chown_to UID:GID\n\n");
    printf("Each line of output represents one file. st_* fields are direct ");
    printf("from the inode\ndata structure. pwalk provides additional ");
    printf("data for directories.\n\n");
@@ -121,79 +146,22 @@ printHelp()
    printHeader();
 }
 
-/* Escape CSV delimeters */
-void
-csv_escape(char *in, char *out)
-{
-   char *t, *orig;
-   int cnt = 0;
-
-   t = out;
-   orig = in;
-   while ( *in ) {
-      if ( *in == '"' )
-          *out++ = '"';
-      if ( (unsigned char)*in < 32 ) {
-          in++;
-          cnt++;
-      } else
-          *out++ = *in++;
-   *out = '\0';
-   }
-   if ( cnt )
-       fprintf( stderr, "Bad File: %s\n", orig);
-}
-
-/*
- *  printStat this needs to be in a crital secion  (and it is!)
- */
-void
-printStat( struct threadData *cur, char *exten, struct stat *f, 
-        long fileCnt, /* directory only - count files in directory */
-        long dirSz )  /* directory only - sum of files within directory */
-{
-   char out[FILENAME_MAX+FILENAME_MAX];
-   char fname[FILENAME_MAX];
-   char exten_csv[FILENAME_MAX];
-   ino_t ino, pino;
-   long depth;
-
-   csv_escape(cur->dname, fname);
-   if ( exten )
-      csv_escape(exten, exten_csv);
-   else
-      exten_csv[0] = '\0';
-   if ( fileCnt != -1 ) {  /* directory */
-      ino = f->st_ino; pino = cur->pinode; depth = cur->depth - 1;}
-   else {  /* Not a directory */
-      ino = f->st_ino; pino = cur->pstat.st_ino; depth = cur->depth; }
-   sprintf ( out, "%ju,%ju,%ld,\"%s\",\"%s\",%ld,%ld,%ld,%ld,%ld,%d,\"%07o\",%ld,%ld,%ld,%ld,%ld\n",
-            (uintmax_t)ino, (uintmax_t)pino, depth,
-            fname, exten_csv, (long)f->st_uid,
-            (long)f->st_gid, (long)f->st_size, (long)f->st_dev,
-            (long)f->st_blocks, (int)f->st_nlink,
-            (int)f->st_mode,
-            (long)f->st_atime, (long)f->st_mtime, (long)f->st_ctime, 
-            fileCnt, dirSz );
-    fputs( out, stdout );
-}
-
 /********************************
-    Open a directory and read the conents. 
+    Open a directory and read the conents.
     call opendir with path passed in as an argument
-    stat every file from opendir 
- 
+    stat every file from opendir
+
     If maxthread is not reached creat a new thread and call self
-    If no threads available Recursively call self for each directory 
-    from opendir. 
- 
+    If no threads available Recursively call self for each directory
+    from opendir.
+
     print inode meta data for each file, one line per file in CSV format
     print directory information after every file is processed from
     open dir.  Direcory information has - count of files, sum of file sizes
 
 *********************************/
 void
-*fileDir( void *arg ) 
+*fileDir( void *arg )
 {
     char *s, *t, *u, *dot, *end_dname;
     int  i, slot, status;
@@ -276,7 +244,7 @@ void
             new->depth  = cur->depth + 1;
             new->pinode = cur->pstat.st_ino; /* Parent Inode */
             if ( new->THRDid != cur->THRDid ) {  /* new thread available */
-                pthread_create( &tdslot[slot].thread_id, &tdslot[slot].tattr, 
+                pthread_create( &tdslot[slot].thread_id, &tdslot[slot].tattr,
                                 fileDir, (void*)new );
             } else {
                 fileDir( (void*) new );
@@ -284,31 +252,31 @@ void
         } else {
            s = end_dname + 1; dot = NULL; /* file extension */
            while ( *s ) {
-               if (*s == '.') dot = s+1; 
-               s++; 
+               if (*s == '.') dot = s+1;
+               s++;
            }
            pthread_mutex_lock (&mutexPrintStat);
-           printStat( cur, dot, &f, (long)-1, (long)0 );
+           (*fileProcess)( cur, dot, &f, (long)-1, (long)0 );
            pthread_mutex_unlock (&mutexPrintStat);
         }
     }
     closedir( dirp );
     *--end_dname = '\0';
     s = end_dname - 1; dot = NULL;
-    while ( *s != '/' ) { 
+    while ( *s != '/' ) {
        if (*s == '.') { dot = s+1; break; }
        s--; }
     if ( s+1 == dot ) /* Dot file is not an extension Exp: /.bashrc */
        dot = NULL;
     pthread_mutex_lock (&mutexPrintStat);
-    printStat( cur, dot, &cur->pstat, localCnt, localSz );
+    (*fileProcess)( cur, dot, &cur->pstat, localCnt, localSz);
     pthread_mutex_unlock (&mutexPrintStat);
-    if ( cur->flag == 0 ) { /* this instance of fileDir is a thread */ 
+    if ( cur->flag == 0 ) { /* this instance of fileDir is a thread */
         pthread_mutex_lock ( &mutexFD );
 #ifdef THRD_DEBUG
         fprintf( stderr, "msg=endTHRD,threadID=%ld,rdepth=%d,file=<%s>\n",
         cur->THRDid, cur->flag, cur->dname );
-#endif 
+#endif
         --ThreadCNT;
         cur->THRDid = -1;
         pthread_mutex_unlock ( &mutexFD );
@@ -324,19 +292,19 @@ void
 int
 main( int argc, char* argv[] )
 {
-    int error, i;
-    char *s, *c;
+    int error, i, colon =':';
+    char *s, *c, *gid_ptr;
     struct stat root;
 
     if ( argc < 2 ) {
-        printHelp( ); 
+        printHelp( );
         exit( EXIT_FAILURE );
     }
     exclude_list[0] = NULL;
-    argc--; argv++; 
+    argc--; argv++;
     while ( argc > 0 && *argv[0] == '-' ) {
         if ( !strcmp(*argv, "--NoSnap" ) )
-           SNAPSHOT = 1; 
+           SNAPSHOT = 1;
         if ( !strcmp(*argv, "--depth" ) ) {
            argc--; argv++;
            DEPTH = atoi(*argv);
@@ -344,24 +312,41 @@ main( int argc, char* argv[] )
         if ( !strcmp(*argv, "--help" ) ) {
            printHelp( );
            exit(0); }
-        if ( !strcmp(*argv, "--version" ) || !strcmp(*argv, "-v") ) 
+        if ( !strcmp(*argv, "--version" ) || !strcmp(*argv, "-v") )
            printVersion( );
-        if ( !strcmp(*argv, "--header" ) || !strcmp(*argv, "-v") ) 
+        if ( !strcmp(*argv, "--header" ) || !strcmp(*argv, "-v") )
            printHeader();
         if ( !strcmp(*argv, "--exclude" )) {
            argc--; argv++;
            get_exclude_list(*argv, exclude_list);
            verify_paths(exclude_list); }
         if ( !strcmp(*argv, "--one-file-system" ) || !strcmp(*argv, "-x") )
-           ONE_FS = 1; 
+           ONE_FS = 1;
+        if ( !strcmp(*argv, "--chown_from")) {
+           argc--; argv++;
+           UID_orig = atoi(*argv);
+           chown_flag++;
+        }
+        if ( !strcmp(*argv, "--chown_to")) {
+           argc--; argv++;
+           UID_new = atoi(*argv);
+           if ( gid_ptr = strchr(*argv, colon))
+              GID_new = atoi(++gid_ptr);
+           else {
+              fprintf( stderr, "--chown_to requires UID:GID as argument\n");
+              exit(1);
+           }
+           chown_flag++;
+        }
         argc--; argv++;
-    }
-    if ( argc == 0 ) {
-       printHelp();
-       exit(1);
     }
     if (setuid((uid_t) 0)) {
        fprintf(stderr, "unable to setuid root; not all files will be processed\n");
+    }
+    fileProcess = &printStat;
+    if ( chown_flag == 2 ) {
+       fprintf(stderr, "chown UID_orig: %d  UID_new: %d GID_new: %d\n", (int)UID_orig, (int)UID_new, (int)GID_new);
+       fileProcess = &changeOwner;
     }
     for ( i=0; i<MAXTHRDS; i++ ) {
         tdslot[i].THRDid = -1;
@@ -380,7 +365,7 @@ main( int argc, char* argv[] )
     strcpy( tdslot[0].dname, (const char*) *argv );
     if ( lstat( *argv, &root ) == -1 ) {
         fprintf( stderr, "lstat: '%s' %s\n", *argv, strerror(errno));
-        exit(errno); 
+        exit(errno);
     }
     ST_DEV = root.st_dev;
     memcpy( &tdslot[0].pstat, &root, sizeof( struct stat ) );
@@ -388,7 +373,7 @@ main( int argc, char* argv[] )
     tdslot[0].flag = 0;
     tdslot[0].depth = 0;
     tdslot[0].pinode = 0;
-    pthread_create( &(tdslot[0].thread_id), &tdslot[0].tattr, fileDir, 
+    pthread_create( &(tdslot[0].thread_id), &tdslot[0].tattr, fileDir,
                     (void*)&tdslot[0] );
     pthread_exit( NULL );
 }
