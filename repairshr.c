@@ -1,5 +1,5 @@
 /*
- *  repair-shared.c  Parallel permission repair for shared folders
+ *  repair-shared. Parallel permission repair for shared folders
 Copyright (C) (2024) John F Dey
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
@@ -29,6 +29,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 #define MAX_PATH 4096
 #define MAXEXFILES 512
+#define MAX_GROUPS 100
 
 int SNAPSHOT = 0;
 int ONE_FS = 0;
@@ -36,6 +37,8 @@ int DRY_RUN = 0;
 dev_t ST_DEV;
 
 char *exclude_list[MAXEXFILES];
+gid_t change_groups[MAX_GROUPS];
+int change_groups_count = 0;
 
 pthread_mutex_t mutexFD;
 pthread_mutex_t mutexLog;
@@ -64,6 +67,14 @@ void log_error(const char *format, ...) {
 }
 
 gid_t find_non_private_group(const char *path, gid_t start_gid) {
+    static char last_path[MAX_PATH] = "";
+    static gid_t last_non_private_gid = 0;
+
+    // Check if we've already found a non-private group for this path
+    if (strncmp(path, last_path, strlen(last_path)) == 0) {
+        return last_non_private_gid;
+    }
+
     char current_path[MAX_PATH];
     struct stat st;
     strncpy(current_path, path, sizeof(current_path));
@@ -71,6 +82,9 @@ gid_t find_non_private_group(const char *path, gid_t start_gid) {
     while (strlen(current_path) > 1) {
         if (lstat(current_path, &st) == 0) {
             if (st.st_gid != st.st_uid) {
+                // Cache the result
+                strncpy(last_path, path, sizeof(last_path));
+                last_non_private_gid = st.st_gid;
                 return st.st_gid;
             }
         }
@@ -84,6 +98,15 @@ gid_t find_non_private_group(const char *path, gid_t start_gid) {
     return start_gid;
 }
 
+int should_change_group(gid_t gid) {
+    for (int i = 0; i < change_groups_count; i++) {
+        if (gid == change_groups[i]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void repair_permissions(const char *path, struct stat *st) {
     mode_t new_mode = st->st_mode;
     gid_t new_gid = st->st_gid;
@@ -95,12 +118,16 @@ void repair_permissions(const char *path, struct stat *st) {
         changes = 1;
     }
 
-    // Check for private group
-    if (st->st_gid == st->st_uid) {
+    // Check for private group or groups to change
+    if (st->st_gid == st->st_uid || should_change_group(st->st_gid)) {
         gid_t non_private_gid = find_non_private_group(path, st->st_gid);
         if (non_private_gid != st->st_gid) {
-            new_gid = non_private_gid;
-            changes = 1;
+            if (non_private_gid == 0) {
+                log_error("Warning: Changing group to root (gid 0) is not allowed for %s\n", path);
+            } else {
+                new_gid = non_private_gid;
+                changes = 1;
+            }
         } else {
             log_error("Error: No non-private group found for %s\n", path);
         }
@@ -133,7 +160,7 @@ void repair_permissions(const char *path, struct stat *st) {
             }
         }
 
-        if (new_gid != st->st_gid) {
+        if (new_gid != st->st_gid && new_gid != 0) {
             if (DRY_RUN) {
                 log_change("Would change group of %s from %d to %d\n", path, st->st_gid, new_gid);
             } else {
@@ -199,6 +226,13 @@ void *repair_directory(void *arg) {
     return NULL;
 }
 
+void remove_trailing_slash(char *path) {
+    size_t len = strlen(path);
+    if (len > 1 && path[len - 1] == '/') {
+        path[len - 1] = '\0';
+    }
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s [options] <directory>\n", argv[0]);
@@ -207,6 +241,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "  --exclude <file>    Specify a file containing paths to exclude\n");
         fprintf(stderr, "  -x, --one-file-system  Stay on one file system\n");
         fprintf(stderr, "  --dry-run           Show changes without making them\n");
+        fprintf(stderr, "  --change-gids <gids>  Comma-separated list of group IDs to change\n");
         exit(1);
     }
 
@@ -228,6 +263,17 @@ int main(int argc, char *argv[]) {
             ONE_FS = 1;
         } else if (strcmp(argv[i], "--dry-run") == 0) {
             DRY_RUN = 1;
+        } else if (strcmp(argv[i], "--change-gids") == 0) {
+            if (++i < argc) {
+                char *token = strtok(argv[i], ",");
+                while (token != NULL && change_groups_count < MAX_GROUPS) {
+                    change_groups[change_groups_count++] = (gid_t)atoi(token);
+                    token = strtok(NULL, ",");
+                }
+            } else {
+                fprintf(stderr, "Error: --change-gids requires a comma-separated list of group IDs\n");
+                exit(1);
+            }
         } else if (directory == NULL) {
             directory = argv[i];
         } else {
@@ -240,6 +286,9 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Error: No directory specified\n");
         exit(1);
     }
+
+    // Remove trailing slash from directory path
+    remove_trailing_slash(directory);
 
     if (DRY_RUN) {
         printf("Dry run mode: No changes will be made to the file system\n");
