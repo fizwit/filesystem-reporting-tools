@@ -1,6 +1,13 @@
 # Change Log
 All notable changes to pwalk will be documented in this file.
 
+## 2023.09.14
+  - ppurge tested on production BeeGFS file system to maintain delete30 tempary file
+    system. 
+
+## 2023.08.14
+ - Initial work on ppurge for purging files based on mtime age
+
 ## 2021.07.14
  - Add Change Owner feature. File owner is changed conditionally. Two arguments
    are required; --chown_from and  -chown_to UID:GID. Check everyfile for
