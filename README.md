@@ -142,17 +142,18 @@ usage: `./repair-shared --NoSnap --dry-run --exclude otherfolder --change-gids 1
 
 #### Prompt to Claude.ai
 
-This prompt was sent to the Claude 3.5 Sonnet Model (along with the pwalk source code) and Claude generated 100% of repairshr.c repairshr.h and repexcl.c: 
+This initial prompt was sent to the Claude 3.5 Sonnet Model (along with the pwalk source code) and Claude generated 100% of repairshr.c repairshr.h and repexcl.c: 
 
 pwalk is a tool that crawls a posix file system in parallel and reports the metadata to a csv file structure to STDOUT. Use the logic of this tool and write a new tool called repair-shared that uses the same command line arguments --NoSnap, --exclude and folder to scan a file system but creates a new tool that can repair permissions in a shared folder so that the content of that folder is accessible to the members of the security group with which these folders are shared. 
 
 Implement these features while logging all changes to STDOUT and errors to STDERR
 
 * Set the setgid bit on all folders if not set.
-* If a file or folder has a gidNumber that is identical to the uidNumber (private group) change the group ownership to the group that owns the first found folder up the tree where that gidNumber is not identical to the uidNumber owning that folder. Stop searching at the root folder where the crawl began and print an error if no group can be found. Only print one error per tree (e.g. root folder is owned by private group)
+* If a file or folder has a gidNumber that is identical to the uidNumber (private group) or is gidNumber 0 (root) change the group ownership to the group that owns the first found folder up the tree where that gidNumber is not identical to the uidNumber owning that folder and it not 0. Stop searching at the root folder where the crawl began and print an error if no group can be found. Only print one error per tree (e.g. root folder is owned by private group)
+* add an option --change-gids which can have a comma separated list of gids that are treated the same way as private groups. 
 * Ensure that each file has at least group read permissions and each folder has at least group read+execute permissions. (chmod +g)
 
-also implment a --dry-run argument for testing only where no changes are made to the file system or file system metadata 
+also implement a --dry-run argument for testing only where no changes are made to the file system or file system metadata. 
 
 ### Author ###
 Pwalk is written by John Dey.  I have been a UNIX/Linux administrator since

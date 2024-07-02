@@ -77,24 +77,13 @@ int should_change_group(gid_t gid) {
 }
 
 gid_t find_non_private_group(const char *path, gid_t start_gid) {
-    static char last_path[MAX_PATH] = "";
-    static gid_t last_non_private_gid = 0;
-
-    // Check if we've already found a non-private group for this path
-    if (strncmp(path, last_path, strlen(last_path)) == 0) {
-        return last_non_private_gid;
-    }
-
     char current_path[MAX_PATH];
     struct stat st;
     strncpy(current_path, path, sizeof(current_path));
 
     while (strlen(current_path) > 1) {
         if (lstat(current_path, &st) == 0) {
-            if (st.st_gid != st.st_uid && st.st_gid != 0) {
-                // Cache the result
-                strncpy(last_path, path, sizeof(last_path));
-                last_non_private_gid = st.st_gid;
+            if (st.st_gid != st.st_uid && st.st_gid != 0 && !should_change_group(st.st_gid)) {
                 return st.st_gid;
             }
         }
@@ -128,7 +117,7 @@ void repair_permissions(const char *path, struct stat *st) {
             new_gid = non_private_gid;
             changes = 1;
         } else {
-            log_error("Error: No suitable non-private, non-root group found for %s\n", path);
+            log_error("Error: No suitable non-private, non-root group found for %s (current gid: %d)\n", path, st->st_gid);
         }
     }
 
@@ -248,29 +237,40 @@ int main(int argc, char *argv[]) {
     int i;
     char *directory = NULL;
     for (i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--NoSnap") == 0) {
-            SNAPSHOT = 1;
-        } else if (strcmp(argv[i], "--exclude") == 0) {
-            if (++i < argc) {
-                get_exclude_list(argv[i], exclude_list);
-                verify_paths(exclude_list);
-            } else {
-                fprintf(stderr, "Error: --exclude requires a filename\n");
-                exit(1);
-            }
-        } else if (strcmp(argv[i], "-x") == 0 || strcmp(argv[i], "--one-file-system") == 0) {
-            ONE_FS = 1;
-        } else if (strcmp(argv[i], "--dry-run") == 0) {
-            DRY_RUN = 1;
-        } else if (strcmp(argv[i], "--change-gids") == 0) {
-            if (++i < argc) {
-                char *token = strtok(argv[i], ",");
-                while (token != NULL && change_groups_count < MAX_GROUPS) {
-                    change_groups[change_groups_count++] = (gid_t)atoi(token);
-                    token = strtok(NULL, ",");
+        if (argv[i][0] == '-') {
+            if (strcmp(argv[i], "--NoSnap") == 0) {
+                SNAPSHOT = 1;
+            } else if (strcmp(argv[i], "--exclude") == 0) {
+                if (++i < argc) {
+                    get_exclude_list(argv[i], exclude_list);
+                    verify_paths(exclude_list);
+                } else {
+                    fprintf(stderr, "Error: --exclude requires a filename\n");
+                    exit(1);
                 }
+            } else if (strcmp(argv[i], "-x") == 0 || strcmp(argv[i], "--one-file-system") == 0) {
+                ONE_FS = 1;
+            } else if (strcmp(argv[i], "--dry-run") == 0) {
+                DRY_RUN = 1;
+            } else if (strcmp(argv[i], "--change-gids") == 0) {
+                if (++i < argc) {
+                    char *token = strtok(argv[i], ",");
+                    while (token != NULL && change_groups_count < MAX_GROUPS) {
+                        change_groups[change_groups_count++] = (gid_t)atoi(token);
+                        token = strtok(NULL, ",");
+                    }
+                } else {
+                    fprintf(stderr, "Error: --change-gids requires a comma-separated list of group IDs\n");
+                    exit(1);
+                }
+            } else if (argv[i][1] == '-') {
+                fprintf(stderr, "Error: Unknown option '%s'\n", argv[i]);
+                exit(1);
+            } else if (strlen(argv[i]) == 2) {
+                fprintf(stderr, "Error: Unknown option '%s'\n", argv[i]);
+                exit(1);
             } else {
-                fprintf(stderr, "Error: --change-gids requires a comma-separated list of group IDs\n");
+                fprintf(stderr, "Error: Invalid option '%s'\n", argv[i]);
                 exit(1);
             }
         } else if (directory == NULL) {
