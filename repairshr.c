@@ -66,6 +66,16 @@ void log_error(const char *format, ...) {
     va_end(args);
 }
 
+int should_change_group(gid_t gid) {
+    int i;
+    for (i = 0; i < change_groups_count; i++) {
+        if (gid == change_groups[i]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 gid_t find_non_private_group(const char *path, gid_t start_gid) {
     static char last_path[MAX_PATH] = "";
     static gid_t last_non_private_gid = 0;
@@ -81,7 +91,7 @@ gid_t find_non_private_group(const char *path, gid_t start_gid) {
 
     while (strlen(current_path) > 1) {
         if (lstat(current_path, &st) == 0) {
-            if (st.st_gid != st.st_uid) {
+            if (st.st_gid != st.st_uid && st.st_gid != 0) {
                 // Cache the result
                 strncpy(last_path, path, sizeof(last_path));
                 last_non_private_gid = st.st_gid;
@@ -95,16 +105,9 @@ gid_t find_non_private_group(const char *path, gid_t start_gid) {
             break;
         }
     }
-    return start_gid;
-}
 
-int should_change_group(gid_t gid) {
-    for (int i = 0; i < change_groups_count; i++) {
-        if (gid == change_groups[i]) {
-            return 1;
-        }
-    }
-    return 0;
+    // If we reach here, we didn't find a suitable non-private, non-root group
+    return 0;  // Indicate that no suitable group was found
 }
 
 void repair_permissions(const char *path, struct stat *st) {
@@ -118,18 +121,14 @@ void repair_permissions(const char *path, struct stat *st) {
         changes = 1;
     }
 
-    // Check for private group or groups to change
-    if (st->st_gid == st->st_uid || should_change_group(st->st_gid)) {
+    // Check for private group, root group, or groups to change
+    if (st->st_gid == st->st_uid || st->st_gid == 0 || should_change_group(st->st_gid)) {
         gid_t non_private_gid = find_non_private_group(path, st->st_gid);
-        if (non_private_gid != st->st_gid) {
-            if (non_private_gid == 0) {
-                log_error("Warning: Changing group to root (gid 0) is not allowed for %s\n", path);
-            } else {
-                new_gid = non_private_gid;
-                changes = 1;
-            }
+        if (non_private_gid != 0) {
+            new_gid = non_private_gid;
+            changes = 1;
         } else {
-            log_error("Error: No non-private group found for %s\n", path);
+            log_error("Error: No suitable non-private, non-root group found for %s\n", path);
         }
     }
 
@@ -160,7 +159,7 @@ void repair_permissions(const char *path, struct stat *st) {
             }
         }
 
-        if (new_gid != st->st_gid && new_gid != 0) {
+        if (new_gid != st->st_gid) {
             if (DRY_RUN) {
                 log_change("Would change group of %s from %d to %d\n", path, st->st_gid, new_gid);
             } else {
