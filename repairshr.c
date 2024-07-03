@@ -86,7 +86,8 @@ int should_change_group(gid_t gid) {
 gid_t find_non_private_group(const char *path, gid_t start_gid) {
     char current_path[MAX_PATH];
     struct stat st;
-    strncpy(current_path, path, sizeof(current_path));
+    // strncpy(current_path, path, sizeof(current_path));
+    snprintf(current_path, sizeof(current_path), "%s", path);
 
     while (strlen(current_path) > 1) {
         if (lstat(current_path, &st) == 0) {
@@ -201,7 +202,12 @@ void *repair_directory(void *arg) {
             continue;
         }
 
-        snprintf(path, sizeof(path), "%s/%s", cur->dname, d->d_name);
+        // snprintf(path, sizeof(path), "%s/%s", cur->dname, d->d_name);
+        int path_len = snprintf(path, sizeof(path), "%s/%s", cur->dname, d->d_name);
+        if (path_len >= sizeof(path)) {
+            log_error("Path truncated: %s/%s\n", cur->dname, d->d_name);
+            continue;  // Skip this file/directory
+        }        
 
         if (lstat(path, &st) == -1) {
             log_error("Error: Unable to stat %s: %s\n", path, strerror(errno));
@@ -419,7 +425,8 @@ int main(int argc, char *argv[]) {
     }
 
     struct threadData root_td;
-    strncpy(root_td.dname, directory, sizeof(root_td.dname));
+    // strncpy(root_td.dname, directory, sizeof(root_td.dname));
+    snprintf(root_td.dname, sizeof(root_td.dname), "%s", directory);
     root_td.pinode = 0;
     root_td.depth = 0;
     root_td.THRDid = totalTHRDS++;
