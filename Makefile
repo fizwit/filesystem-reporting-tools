@@ -12,6 +12,9 @@ pwalk: pwalk.c exclude.c fileProcess.c
 ppurge: ppurge.c 
 	$(CC) $(CFLAGS) $(LDFLAGS) -o ppurge ppurge.c
 
+repair-shared: repairshr.c repexcl.c
+	$(CC) $(CFALGS) $(LDFLAGS) -o repair-shared repairshr.c repexcl.c
+
 install:
 	chown root ppurge
 	chmod 4755 ppurge 

@@ -27,13 +27,16 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <stdarg.h>
 #include "repairshr.h"
 
+#define VERSION "0.4"
 #define MAX_PATH 4096
 #define MAXEXFILES 512
 #define MAX_GROUPS 100
+#define MAX_EXCLUDES 100
 
 int SNAPSHOT = 0;
 int ONE_FS = 0;
 int DRY_RUN = 0;
+int FORCE_GROUP_WRITABLE = 0;
 dev_t ST_DEV;
 
 char *exclude_list[MAXEXFILES];
@@ -117,20 +120,35 @@ void repair_permissions(const char *path, struct stat *st) {
             new_gid = non_private_gid;
             changes = 1;
         } else {
-            log_error("Error: No suitable non-private, non-root group found for %s (current gid: %d)\n", path, st->st_gid);
+            log_error("Error: No suitable non-private, non-root group found for %s (current gid: %d, uid: %d)\n", 
+                      path, st->st_gid, st->st_uid);
         }
     }
 
     // Ensure minimum group permissions
     if (S_ISDIR(st->st_mode)) {
-        if ((st->st_mode & S_IRGRP) == 0 || (st->st_mode & S_IXGRP) == 0) {
-            new_mode |= S_IRGRP | S_IXGRP;
-            changes = 1;
+        if (FORCE_GROUP_WRITABLE) {
+            if ((st->st_mode & S_IRWXG) != (S_IRWXG)) {
+                new_mode |= S_IRWXG;  // Read, write, and execute for group
+                changes = 1;
+            }
+        } else {
+            if ((st->st_mode & S_IRGRP) == 0 || (st->st_mode & S_IXGRP) == 0) {
+                new_mode |= S_IRGRP | S_IXGRP;
+                changes = 1;
+            }
         }
     } else {
-        if ((st->st_mode & S_IRGRP) == 0) {
-            new_mode |= S_IRGRP;
-            changes = 1;
+        if (FORCE_GROUP_WRITABLE) {
+            if ((st->st_mode & (S_IRGRP | S_IWGRP)) != (S_IRGRP | S_IWGRP)) {
+                new_mode |= S_IRGRP | S_IWGRP;  // Read and write for group
+                changes = 1;
+            }
+        } else {
+            if ((st->st_mode & S_IRGRP) == 0) {
+                new_mode |= S_IRGRP;
+                changes = 1;
+            }
         }
     }
 
@@ -221,31 +239,45 @@ void remove_trailing_slash(char *path) {
     }
 }
 
+void print_help(const char *program_name) {
+    fprintf(stderr, "Usage: %s [options] <folder>\n", program_name);
+    fprintf(stderr, "Options:\n");
+    fprintf(stderr, "  --NoSnap                 Ignore .snapshot directories\n");
+    fprintf(stderr, "  --exclude <path>         Specify a full path to exclude (can be used multiple times)\n");
+    fprintf(stderr, "  --dry-run                Show changes without making them\n");
+    fprintf(stderr, "  --change-gids <gids>     Comma-separated list of group IDs to change to next group up\n");
+    fprintf(stderr, "  --force-group-writable   Make all files and folders group readable and writable\n");
+    fprintf(stderr, "  -x, --one-file-system    Stay on one file system\n");
+    fprintf(stderr, "  --version                Display version information and exit\n");
+    fprintf(stderr, "  --help                   Display this help message and exit\n");
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s [options] <directory>\n", argv[0]);
-        fprintf(stderr, "Options:\n");
-        fprintf(stderr, "  --NoSnap            Ignore .snapshot directories\n");
-        fprintf(stderr, "  --exclude <file>    Specify a file containing paths to exclude\n");
-        fprintf(stderr, "  -x, --one-file-system  Stay on one file system\n");
-        fprintf(stderr, "  --dry-run           Show changes without making them\n");
-        fprintf(stderr, "  --change-gids <gids>  Comma-separated list of group IDs to change\n");
+        print_help(argv[0]);
         exit(1);
     }
 
     // Parse command-line arguments
     int i;
     char *directory = NULL;
+    char *exclude_files[MAX_EXCLUDES] = {NULL};
+    int exclude_count = 0;
+
     for (i = 1; i < argc; i++) {
         if (argv[i][0] == '-') {
             if (strcmp(argv[i], "--NoSnap") == 0) {
                 SNAPSHOT = 1;
             } else if (strcmp(argv[i], "--exclude") == 0) {
                 if (++i < argc) {
-                    get_exclude_list(argv[i], exclude_list);
-                    verify_paths(exclude_list);
+                    if (exclude_count < MAX_EXCLUDES) {
+                        exclude_files[exclude_count++] = argv[i];
+                    } else {
+                        fprintf(stderr, "Error: Too many exclude paths specified. Maximum is %d.\n", MAX_EXCLUDES);
+                        exit(1);
+                    }
                 } else {
-                    fprintf(stderr, "Error: --exclude requires a filename\n");
+                    fprintf(stderr, "Error: --exclude requires a path\n");
                     exit(1);
                 }
             } else if (strcmp(argv[i], "-x") == 0 || strcmp(argv[i], "--one-file-system") == 0) {
@@ -263,10 +295,15 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr, "Error: --change-gids requires a comma-separated list of group IDs\n");
                     exit(1);
                 }
+            } else if (strcmp(argv[i], "--force-group-writable") == 0) {
+                FORCE_GROUP_WRITABLE = 1;
+            } else if (strcmp(argv[i], "--version") == 0) {
+                printf("%s version %s\n", argv[0], VERSION);
+                exit(0);
+            } else if (strcmp(argv[i], "--help") == 0) {
+                print_help(argv[0]);
+                exit(0);
             } else if (argv[i][1] == '-') {
-                fprintf(stderr, "Error: Unknown option '%s'\n", argv[i]);
-                exit(1);
-            } else if (strlen(argv[i]) == 2) {
                 fprintf(stderr, "Error: Unknown option '%s'\n", argv[i]);
                 exit(1);
             } else {
@@ -283,8 +320,15 @@ int main(int argc, char *argv[]) {
 
     if (directory == NULL) {
         fprintf(stderr, "Error: No directory specified\n");
+        print_help(argv[0]);
         exit(1);
     }
+
+    // Process all exclude files
+    for (i = 0; i < exclude_count; i++) {
+        get_exclude_list(exclude_files[i], exclude_list);
+    }
+    verify_paths(exclude_list);
 
     // Remove trailing slash from directory path
     remove_trailing_slash(directory);
