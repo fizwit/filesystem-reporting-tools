@@ -354,7 +354,7 @@ int main(int argc, char *argv[]) {
                 } else {
                     fprintf(stderr, "Error: --threads requires a number\n");
                     exit(1);
-                }                
+                }
             } else if (strcmp(argv[i], "--version") == 0) {
                 printf("%s version %s\n", argv[0], VERSION);
                 exit(0);
