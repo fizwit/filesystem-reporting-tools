@@ -27,12 +27,13 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <stdarg.h>
 #include "repairshr.h"
 
-#define VERSION "0.4"
+#define VERSION "0.5"
 #define MAX_PATH 4096
 #define MAXEXFILES 512
 #define MAX_GROUPS 100
 #define MAX_EXCLUDES 100
 
+int MAX_THREADS = 32;
 int SNAPSHOT = 0;
 int ONE_FS = 0;
 int DRY_RUN = 0;
@@ -43,10 +44,13 @@ char *exclude_list[MAXEXFILES];
 gid_t change_groups[MAX_GROUPS];
 int change_groups_count = 0;
 
+int ThreadCNT = 1; /* ThreadCNT < MAX_THREADS */
+int totalTHRDS = 0;
+struct threadData *tdslot;
+
 pthread_mutex_t mutexFD;
 pthread_mutex_t mutexLog;
 
-// Function declarations
 int check_exclude_list(char *fname);
 void get_exclude_list(char* fname, char *list[]);
 void verify_paths(char *list[]);
@@ -219,16 +223,54 @@ void *repair_directory(void *arg) {
                 continue;
             }
 
-            struct threadData new_td;
-            strncpy(new_td.dname, path, sizeof(new_td.dname));
-            new_td.pinode = st.st_ino;
-            new_td.depth = cur->depth + 1;
+            int i;
+            pthread_mutex_lock(&mutexFD);
+            int slot = -1;
+            if (ThreadCNT < MAX_THREADS) {
+                for (i = 0; i < MAX_THREADS; i++) {
+                    if (tdslot[i].THRDid == -1) {
+                        slot = i;
+                        break;
+                    }
+                }
+            }
+            pthread_mutex_unlock(&mutexFD);
 
-            repair_directory(&new_td);
+            struct threadData *new_td;
+            if (slot != -1) {
+                new_td = &tdslot[slot];
+                new_td->THRDid = totalTHRDS++;
+                new_td->flag = 0;
+                ThreadCNT++;
+            } else {
+                new_td = malloc(sizeof(struct threadData));
+                new_td->THRDid = cur->THRDid;
+                new_td->flag = cur->flag + 1;
+            }
+
+            strncpy(new_td->dname, path, sizeof(new_td->dname));
+            new_td->pinode = st.st_ino;
+            new_td->depth = cur->depth + 1;
+
+            if (slot != -1) {
+                pthread_create(&new_td->thread_id, &new_td->tattr, repair_directory, (void *)new_td);
+            } else {
+                repair_directory((void *)new_td);
+                free(new_td);
+            }
         }
     }
 
     closedir(dirp);
+
+    if (cur->flag == 0) {
+        pthread_mutex_lock(&mutexFD);
+        ThreadCNT--;
+        cur->THRDid = -1;
+        pthread_mutex_unlock(&mutexFD);
+        pthread_exit(NULL);
+    }
+
     return NULL;
 }
 
@@ -242,11 +284,12 @@ void remove_trailing_slash(char *path) {
 void print_help(const char *program_name) {
     fprintf(stderr, "Usage: %s [options] <folder>\n", program_name);
     fprintf(stderr, "Options:\n");
+    fprintf(stderr, "  --dry-run                Show changes without making them\n");    
     fprintf(stderr, "  --NoSnap                 Ignore .snapshot directories\n");
     fprintf(stderr, "  --exclude <path>         Specify a full path to exclude (can be used multiple times)\n");
-    fprintf(stderr, "  --dry-run                Show changes without making them\n");
     fprintf(stderr, "  --change-gids <gids>     Comma-separated list of group IDs to change to next group up\n");
     fprintf(stderr, "  --force-group-writable   Make all files and folders group readable and writable\n");
+    fprintf(stderr, "  --threads <num>          Set maximum number of threads (current default: %d)\n", MAX_THREADS);        
     fprintf(stderr, "  -x, --one-file-system    Stay on one file system\n");
     fprintf(stderr, "  --version                Display version information and exit\n");
     fprintf(stderr, "  --help                   Display this help message and exit\n");
@@ -297,6 +340,17 @@ int main(int argc, char *argv[]) {
                 }
             } else if (strcmp(argv[i], "--force-group-writable") == 0) {
                 FORCE_GROUP_WRITABLE = 1;
+            } else if (strcmp(argv[i], "--threads") == 0) {
+                if (++i < argc) {
+                    MAX_THREADS = atoi(argv[i]);
+                    if (MAX_THREADS <= 0) {
+                        fprintf(stderr, "Error: Invalid thread count. Must be a positive integer.\n");
+                        exit(1);
+                    }
+                } else {
+                    fprintf(stderr, "Error: --threads requires a number\n");
+                    exit(1);
+                }                
             } else if (strcmp(argv[i], "--version") == 0) {
                 printf("%s version %s\n", argv[0], VERSION);
                 exit(0);
@@ -345,18 +399,42 @@ int main(int argc, char *argv[]) {
 
     ST_DEV = root_st.st_dev;
 
+    tdslot = malloc(sizeof(struct threadData) * MAX_THREADS);
+    if (tdslot == NULL) {
+        fprintf(stderr, "Error: Failed to allocate memory for thread data\n");
+        exit(1);
+    }
     pthread_mutex_init(&mutexFD, NULL);
     pthread_mutex_init(&mutexLog, NULL);
+
+    // Initialize thread attributes
+    int error;
+    for (i = 0; i < MAX_THREADS; i++) {
+        tdslot[i].THRDid = -1;
+        if ((error = pthread_attr_init(&tdslot[i].tattr))) {
+            fprintf(stderr, "Failed to create pthread attr: %s\n", strerror(error));
+        } else if ((error = pthread_attr_setdetachstate(&tdslot[i].tattr, PTHREAD_CREATE_DETACHED))) {
+            fprintf(stderr, "Failed to set attribute detached: %s\n", strerror(error));
+        }
+    }
 
     struct threadData root_td;
     strncpy(root_td.dname, directory, sizeof(root_td.dname));
     root_td.pinode = 0;
     root_td.depth = 0;
+    root_td.THRDid = totalTHRDS++;
+    root_td.flag = 0;
 
-    repair_directory(&root_td);
+    pthread_create(&root_td.thread_id, &tdslot[0].tattr, repair_directory, (void *)&root_td);
+
+    // Wait for all threads to complete
+    while (ThreadCNT > 0) {
+        usleep(1000);
+    }
 
     pthread_mutex_destroy(&mutexFD);
     pthread_mutex_destroy(&mutexLog);
+    free(tdslot);
 
     return 0;
 }
