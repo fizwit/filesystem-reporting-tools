@@ -25,9 +25,11 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <pthread.h>
 #include <grp.h>
 #include <stdarg.h>
+#include <limits.h>
+#include <libgen.h>
 #include "repairshr.h"
 
-#define VERSION "0.5"
+#define VERSION "0.5.1"
 #define MAX_PATH 4096
 #define MAXEXFILES 512
 #define MAX_GROUPS 100
@@ -311,6 +313,32 @@ int main(int argc, char *argv[]) {
     char *exclude_files[MAX_EXCLUDES] = {NULL};
     int exclude_count = 0;
 
+    // Check if setuid bit is set
+    char real_path[MAX_PATH];
+    ssize_t len = readlink("/proc/self/exe", real_path, sizeof(real_path) - 1);
+    if (len != -1) {
+        real_path[len] = '\0';
+        struct stat st;
+        if (stat(real_path, &st) == 0) {
+            if (st.st_mode & S_ISUID) {
+                // Setuid bit is set
+                if (st.st_mode & S_IXOTH) {
+                    fprintf(stderr, "Error: Refusing to run with setuid bit set and world-executable permissions.\n");
+                    exit(1);
+                }
+                char *dir = dirname(real_path);
+                directory = strdup(dir);
+                printf("Running with setuid bit set. Using directory: %s\n", directory);
+            }
+        } else {
+            fprintf(stderr, "Error: Unable to stat the binary\n");
+            exit(1);
+        }
+    } else {
+        fprintf(stderr, "Error: Unable to resolve real path of binary\n");
+        exit(1);
+    }    
+
     for (i = 1; i < argc; i++) {
         if (argv[i][0] == '-') {
             if (strcmp(argv[i], "--NoSnap") == 0) {
@@ -370,9 +398,7 @@ int main(int argc, char *argv[]) {
             }
         } else if (directory == NULL) {
             directory = argv[i];
-        } else {
-            fprintf(stderr, "Error: Unexpected argument '%s'\n", argv[i]);
-            exit(1);
+
         }
     }
 
@@ -439,6 +465,9 @@ int main(int argc, char *argv[]) {
     pthread_mutex_destroy(&mutexFD);
     pthread_mutex_destroy(&mutexLog);
     free(tdslot);
+    if (directory != NULL) {
+        free(directory);
+    }
 
     return 0;
 }
