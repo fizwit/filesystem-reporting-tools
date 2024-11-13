@@ -1,7 +1,7 @@
 /*
- *  fileProcess.c  
+ *  fileProcess.c
 
-Copyright (C) (2013-2016) John F Dey 
+Copyright (C) (2013-2016) John F Dey
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
@@ -19,10 +19,10 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
  */
 
-/* 
+/*
 
 For each file found by Pwalk, process the file.
-File processing functions go in this file.  File process routines must 
+File processing functions go in this file.  File process routines must
 keep the same arguments as defined by the prototype fileProcess()
 
  */
@@ -70,7 +70,7 @@ csv_escape(char *in, char *out)
  * if file owned by UID_orig chown UID_new:GID_new
  */
 void
-changeOwner( struct threadData *cur, char *exten, struct stat *f, 
+changeOwner( struct threadData *cur, char *exten, struct stat *f,
         long fileCnt, /* directory only - count files in directory */
         long dirSz )  /* directory only - sum of files within directory */
 {
@@ -92,7 +92,7 @@ changeOwner( struct threadData *cur, char *exten, struct stat *f,
  *  printStat this needs to be in a crital secion  (and it is!)
  */
 void
-printStat( struct threadData *cur, char *exten, struct stat *f, 
+printStat( struct threadData *cur, char *exten, struct stat *f,
         long fileCnt, /* directory only - count files in directory */
         long dirSz )  /* directory only - sum of files within directory */
 {
@@ -117,7 +117,7 @@ printStat( struct threadData *cur, char *exten, struct stat *f,
             (long)f->st_gid, (long)f->st_size, (long)f->st_dev,
             (long)f->st_blocks, (int)f->st_nlink,
             (int)f->st_mode,
-            (long)f->st_atime, (long)f->st_mtime, (long)f->st_ctime, 
+            (long)f->st_atime, (long)f->st_mtime, (long)f->st_ctime,
             fileCnt, dirSz );
     fputs( out, stdout );
 }

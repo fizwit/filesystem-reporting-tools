@@ -262,14 +262,8 @@ void
     }
     closedir( dirp );
     *--end_dname = '\0';
-    s = end_dname - 1; dot = NULL;
-    while ( *s != '/' ) {
-       if (*s == '.') { dot = s+1; break; }
-       s--; }
-    if ( s+1 == dot ) /* Dot file is not an extension Exp: /.bashrc */
-       dot = NULL;
     pthread_mutex_lock (&mutexPrintStat);
-    (*fileProcess)( cur, dot, &cur->pstat, localCnt, localSz);
+    (*fileProcess)( cur, NULL, &cur->pstat, localCnt, localSz);
     pthread_mutex_unlock (&mutexPrintStat);
     if ( cur->flag == 0 ) { /* this instance of fileDir is a thread */
         pthread_mutex_lock ( &mutexFD );

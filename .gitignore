@@ -4,3 +4,4 @@ test.lst
 test
 output*
 *.o
+.vscode

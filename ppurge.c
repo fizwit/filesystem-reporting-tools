@@ -30,7 +30,7 @@ along with this program; If not, see <https://www.gnu.org/licenses/>.
 #include <fcntl.h>
 #include <utime.h>
 
-/*  
+/*
 ppurge  Parallel Purge
 
 ppurge is a tool for maintaining HPC scratch storage volumes by removing files
@@ -40,8 +40,8 @@ File purging is accomplished with two steps. Step one is to mark a file as
 Ppurge subdirectories are local to the directory where the data files reside.
 The files in `.ppurge` are kept for an additional n days until removed permanently.
 
-The example usage case are volumes attached to HPC systems which have names like 
-"/scratch30". Ppurge should be run once per day. Files are only removed from the 
+The example usage case are volumes attached to HPC systems which have names like
+"/scratch30". Ppurge should be run once per day. Files are only removed from the
 volme after n+n days. The first `n` days the files are moved to `.ppurge`. Then after
 an additional `n` days the files are removed (unlink).
 
@@ -49,11 +49,11 @@ Ppurge should only run on volumes that do not have snapshots. The storage volume
 should be a single volume that is not bridged.
 
  - File age is based on `mtime`.
- - `.ppurge` directories only contain files, no directories are moved.
+ - `.ppurge` directories only contain files, no directories are removed.
  - mtime and atime are not affected by move (rename)
- - Remove files from the `.ppurge` cache based on `mtime`.
+ - Remove files from the `.ppurge` cache based on `mtime`
  - during the cache period users can recover files from `.ppurge`
-   by using the "move" command. Do not let users use "copy" cp.
+   by using the linux "move" command. Do not let users use "copy" cp.
    mv .ppurge/I_need_this_file .
  - .ppurge directory has user sticky bit set. Only the file owners can move or delete files
 
@@ -76,7 +76,7 @@ type, depth, fname, UID, GID, st_size, st_mode, atime, mtime, ctime
 ppurge creates a log file with the following name ppurge-YYYY.MM.DD-HH_MM_SS.log
 Internal error messages are written to the log file.
 
-A list of pathname with illegal characters are written to the log file
+A list of path names with illegal characters are written to the log file.
 */
 
 static char *whoami = "ppurge";
@@ -124,7 +124,7 @@ pthread_mutex_t mutexFD;
 void
 printVersion( ) {
    fprintf(stderr, "%s version %s\n", whoami, Version );
-   fprintf(stderr, "%s Copyright (C) 2013 John F Dey\n", whoami );
+   fprintf(stderr, "%s Copyright (C) 2023 John F Dey\n", whoami );
    fprintf(stderr, "ppurge comes with ABSOLUTELY NO WARRANTY;\n" );
    fprintf(stderr, "This is free software, you can redistribute it and/or\n");
    fprintf(stderr, "modify it under the\nterms of the GNU General Public");
@@ -136,7 +136,7 @@ printVersion( ) {
 void
 printHelp()
 {
-    printf("Useage : %s (fully qualified file name)\n", whoami);
+    printf("Useage : %s (fully qualified path )\n", whoami);
     printf("ppurge should be run daly on volumes with the same value for purgeDays\n");
     printf("Flags: --help\n       --version\n" );
     printf("       --purgeDays (positive integer) Purge files older than n days.\n");
