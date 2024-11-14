@@ -22,7 +22,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <dirent.h>
+#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -55,8 +55,6 @@ char *exclude_list[MAXEXFILES];
 
 int SNAPSHOT =0; /* if set ignore directories called .snapshot */
 int DEPTH = 0; /* if set do not traverse beyond directory depth */
-int ONE_FS =0; /* skip directories on different file systems -x */
-dev_t ST_DEV;  /* save st_dev of root file */
 
 #define MAXTHRDS 32
 int ThreadCNT  = 1; /* ThreadCNT < MAXTHRDS */
@@ -65,35 +63,24 @@ struct threadData tdslot[MAXTHRDS];
 pthread_mutex_t mutexFD;
 pthread_mutex_t mutexPrintStat;
 
-int check_exclude_list(char *fname);
-void verify_paths(char *list[]);
-void get_exclude_list(char *fname, char *list[]);
-
 /* conditioanally change file ownership --chown_from --chown_to */
 uid_t UID_orig, UID_new;
 gid_t GID_new;
 int chown_flag =0;
 
-/* Process files */
+/* function prototypes */
 void
 (*fileProcess)( struct threadData *cur, char *exten, struct stat *f, long, long);
-
-/*
- * conditionally change file ownership
- * if file owned by UID_orig chown UID_new:GID_new
- */
-void
-changeOwner( struct threadData *cur, char *exten, struct stat *f,
+void *fileDir( void *arg );
+int check_exclude_list(char *fname);
+void verify_paths(char *list[]);
+void get_exclude_list(char *fname, char *list[]);
+void changeOwner( struct threadData *cur, char *exten, struct stat *f,
         long fileCnt, /* directory only - count files in directory */
         long dirSz );  /* directory only - sum of files within directory */
-/*
- *  printStat this needs to be in a crital secion  (and it is!)
- */
-void
-printStat( struct threadData *cur, char *exten, struct stat *f,
+void printStat( struct threadData *cur, char *exten, struct stat *f,
         long fileCnt, /* directory only - count files in directory */
         long dirSz );  /* directory only - sum of files within directory */
-
 
 void
 printVersion( ) {
@@ -121,13 +108,10 @@ printHelp()
 {
    printf("Useage : %s (fully qualified file name)\n", whoami);
    printf("Flags: --help --version \n" );
-   printf("       --depth n Stop walking when (n) depth is reached\n");
    printf("       --NoSnap Ignore directories with name .snapshot\n");
    printf("       --exclude filename <file> contains a list of");
    printf(" directories \n");
    printf("         to exclude from reporting\n");
-   printf("       --one-file-system skip directories on different file");
-   printf(" systems\n");
    printf("       --header write CSV header with output\n");
    printf("Conditionally Change File Owner. Two Flags are required.\n");
    printf("       --chown_from UID\n");
@@ -146,148 +130,12 @@ printHelp()
    printHeader();
 }
 
-/********************************
-    Open a directory and read the conents.
-    call opendir with path passed in as an argument
-    stat every file from opendir
-
-    If maxthread is not reached creat a new thread and call self
-    If no threads available Recursively call self for each directory
-    from opendir.
-
-    print inode meta data for each file, one line per file in CSV format
-    print directory information after every file is processed from
-    open dir.  Direcory information has - count of files, sum of file sizes
-
-*********************************/
-void
-*fileDir( void *arg )
-{
-    char *s, *t, *u, *dot, *end_dname;
-    int  i, slot, status;
-    DIR *dirp;
-    long localCnt =0; /* number of files in a specific directory */
-    long localSz  =0; /* byte cnt of files in the local directory 2010.07 */
-    struct dirent *d;
-    struct stat f;
-    struct threadData *cur, *new, local;
-
-    cur = (struct threadData *) arg;
-#ifdef THRD_DEBUG
-    fprintf( stderr, "msg=fileDir,threadID=%ld,rdepth=%d,file=%s\n",
-        cur->THRDid, cur->flag, cur->dname );
-#endif /* THRD_DEBUG */
-    if ( (dirp = opendir( cur->dname )) == NULL ) {
-        fprintf( stderr, "Locked Dir: %s\n", cur->dname );
-        return arg;
-    }
-    /* find the end of fs->name and put '/' at the end <end_dname>
-       points to char after '/' */
-    s = cur->dname + strlen(cur->dname);
-    *s++ = '/';
-    end_dname = s;
-    while ( (d = readdir( dirp )) != NULL ) {
-        if ( strcmp(".",d->d_name) == 0 ) continue;
-        if ( strcmp("..",d->d_name) == 0 ) continue;
-        localCnt++;
-        s = d->d_name; t = end_dname;
-        while ( *s )  /* copy file name to end of current path */
-            *t++ = *s++;
-        *t = '\0';
-        if ( lstat ( cur->dname, &f ) == -1 ) {
-            fprintf( stderr, "threadID=%ld,rdepth=%d lstat: '%s' %s\n",
-              cur->THRDid, cur->flag, strerror(errno), cur->dname);
-            continue;
-        }
-        /* don't report data from foreign file systems */
-        if ( ONE_FS && f.st_dev != ST_DEV )
-            continue;
-        /* Follow Sub dirs recursivly but don't follow links */
-        localSz += f.st_size;
-        if ( S_ISDIR(f.st_mode) ) {
-            if ( SNAPSHOT && !strcmp( ".snapshot", d->d_name ) )
-               continue; /* next file from readdir */
-            if ( DEPTH && DEPTH == cur->depth )
-               continue; /* don't do any deeper than this */
-            if ( exclude_list[0] && check_exclude_list(cur->dname) )
-                    continue;
-            pthread_mutex_lock (&mutexFD);
-            if ( ThreadCNT < MAXTHRDS ) {
-                slot = 0;
-                while ( slot < MAXTHRDS ) {
-                    if ( tdslot[slot].THRDid == -1 ) {
-                        new = &tdslot[slot];
-                        new->THRDid = totalTHRDS++;
-                        new->flag = 0;   /* recurse flag reset for new thread */
-                        break;
-                    }
-                    slot++;
-                }
-                if ( slot == MAXTHRDS )  { /* this would be bad */
-                   fprintf( stderr, "error=%s,threadID=%ld,rdepth=%d,ThreadCNT=%d\n",
-                   "\"no available threads\"", cur->THRDid, cur->flag, ThreadCNT );
-                   exit( 1 );
-                }
-                ThreadCNT++; /* allocate the thread */
-            } else {
-                new = &local;
-                new->THRDid = cur->THRDid;
-                new->flag = cur->flag + 1;
-            }
-            pthread_mutex_unlock (&mutexFD);
-            /* create ponter to tdslot that will be used for next
-               call to fileDir - local or from array - shorten next block of
-               code
-             */
-            memcpy( &(new->pstat), &f, sizeof( struct stat ) );
-            strcpy( new->dname, (const char*)cur->dname );
-            new->depth  = cur->depth + 1;
-            new->pinode = cur->pstat.st_ino; /* Parent Inode */
-            if ( new->THRDid != cur->THRDid ) {  /* new thread available */
-                pthread_create( &tdslot[slot].thread_id, &tdslot[slot].tattr,
-                                fileDir, (void*)new );
-            } else {
-                fileDir( (void*) new );
-            }
-        } else {
-           s = end_dname + 1; dot = NULL; /* file extension */
-           while ( *s ) {
-               if (*s == '.') dot = s+1;
-               s++;
-           }
-           pthread_mutex_lock (&mutexPrintStat);
-           (*fileProcess)( cur, dot, &f, (long)-1, (long)0 );
-           pthread_mutex_unlock (&mutexPrintStat);
-        }
-    }
-    closedir( dirp );
-    *--end_dname = '\0';
-    pthread_mutex_lock (&mutexPrintStat);
-    (*fileProcess)( cur, NULL, &cur->pstat, localCnt, localSz);
-    pthread_mutex_unlock (&mutexPrintStat);
-    if ( cur->flag == 0 ) { /* this instance of fileDir is a thread */
-        pthread_mutex_lock ( &mutexFD );
-#ifdef THRD_DEBUG
-        fprintf( stderr, "msg=endTHRD,threadID=%ld,rdepth=%d,file=<%s>\n",
-        cur->THRDid, cur->flag, cur->dname );
-#endif
-        --ThreadCNT;
-        cur->THRDid = -1;
-        pthread_mutex_unlock ( &mutexFD );
-        pthread_exit( EXIT_SUCCESS );
-    }
-    /* else return ; */
-#ifdef THRD_DEBUG
-    fprintf( stderr, "msg=endRecurse,threadID=%ld,rdepth=%d,file=<%s>\n",
-        cur->THRDid, cur->flag, cur->dname );
-#endif /* THRD_DEBUG */
-}
-
 int
 main( int argc, char* argv[] )
 {
     int error, i, colon =':';
     char *s, *c, *gid_ptr;
+    int rootfd;
     struct stat root;
 
     if ( argc < 2 ) {
@@ -314,8 +162,6 @@ main( int argc, char* argv[] )
            argc--; argv++;
            get_exclude_list(*argv, exclude_list);
            verify_paths(exclude_list); }
-        if ( !strcmp(*argv, "--one-file-system" ) || !strcmp(*argv, "-x") )
-           ONE_FS = 1;
         if ( !strcmp(*argv, "--chown_from")) {
            argc--; argv++;
            UID_orig = atoi(*argv);
@@ -333,9 +179,6 @@ main( int argc, char* argv[] )
            chown_flag++;
         }
         argc--; argv++;
-    }
-    if (setuid((uid_t) 0)) {
-       fprintf(stderr, "unable to setuid root; not all files will be processed\n");
     }
     fileProcess = &printStat;
     if ( chown_flag == 2 ) {
@@ -356,13 +199,17 @@ main( int argc, char* argv[] )
     pthread_mutex_init(&mutexFD, NULL);
     pthread_mutex_init(&mutexPrintStat, NULL);
 
+    if ((rootfd = open(*argv, O_DIRECTORY | O_RDONLY)) == -1 ) {
+        fprintf( stderr, "Could not open root directory:'%s' %s\n", *argv, strerror(errno));
+        exit(errno);
+    }
     strcpy( tdslot[0].dname, (const char*) *argv );
     if ( lstat( *argv, &root ) == -1 ) {
         fprintf( stderr, "lstat: '%s' %s\n", *argv, strerror(errno));
         exit(errno);
     }
-    ST_DEV = root.st_dev;
     memcpy( &tdslot[0].pstat, &root, sizeof( struct stat ) );
+    tdslot[0].dirfd = rootfd;
     tdslot[0].THRDid = totalTHRDS++; /* first thread is zero */
     tdslot[0].flag = 0;
     tdslot[0].depth = 0;
