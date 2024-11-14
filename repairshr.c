@@ -25,25 +25,34 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <pthread.h>
 #include <grp.h>
 #include <stdarg.h>
+#include <limits.h>
+#include <libgen.h>
 #include "repairshr.h"
 
+#define VERSION "0.5.1"
 #define MAX_PATH 4096
 #define MAXEXFILES 512
 #define MAX_GROUPS 100
+#define MAX_EXCLUDES 100
 
+int MAX_THREADS = 32;
 int SNAPSHOT = 0;
 int ONE_FS = 0;
 int DRY_RUN = 0;
+int FORCE_GROUP_WRITABLE = 0;
 dev_t ST_DEV;
 
 char *exclude_list[MAXEXFILES];
 gid_t change_groups[MAX_GROUPS];
 int change_groups_count = 0;
 
+int ThreadCNT = 1; /* ThreadCNT < MAX_THREADS */
+int totalTHRDS = 0;
+struct threadData *tdslot;
+
 pthread_mutex_t mutexFD;
 pthread_mutex_t mutexLog;
 
-// Function declarations
 int check_exclude_list(char *fname);
 void get_exclude_list(char* fname, char *list[]);
 void verify_paths(char *list[]);
@@ -79,7 +88,7 @@ int should_change_group(gid_t gid) {
 gid_t find_non_private_group(const char *path, gid_t start_gid) {
     char current_path[MAX_PATH];
     struct stat st;
-    strncpy(current_path, path, sizeof(current_path));
+    snprintf(current_path, sizeof(current_path), "%s", path);
 
     while (strlen(current_path) > 1) {
         if (lstat(current_path, &st) == 0) {
@@ -117,20 +126,35 @@ void repair_permissions(const char *path, struct stat *st) {
             new_gid = non_private_gid;
             changes = 1;
         } else {
-            log_error("Error: No suitable non-private, non-root group found for %s (current gid: %d)\n", path, st->st_gid);
+            log_error("Error: No suitable non-private, non-root group found for %s (current gid: %d, uid: %d)\n", 
+                      path, st->st_gid, st->st_uid);
         }
     }
 
     // Ensure minimum group permissions
     if (S_ISDIR(st->st_mode)) {
-        if ((st->st_mode & S_IRGRP) == 0 || (st->st_mode & S_IXGRP) == 0) {
-            new_mode |= S_IRGRP | S_IXGRP;
-            changes = 1;
+        if (FORCE_GROUP_WRITABLE) {
+            if ((st->st_mode & S_IRWXG) != (S_IRWXG)) {
+                new_mode |= S_IRWXG;  // Read, write, and execute for group
+                changes = 1;
+            }
+        } else {
+            if ((st->st_mode & S_IRGRP) == 0 || (st->st_mode & S_IXGRP) == 0) {
+                new_mode |= S_IRGRP | S_IXGRP;
+                changes = 1;
+            }
         }
     } else {
-        if ((st->st_mode & S_IRGRP) == 0) {
-            new_mode |= S_IRGRP;
-            changes = 1;
+        if (FORCE_GROUP_WRITABLE) {
+            if ((st->st_mode & (S_IRGRP | S_IWGRP)) != (S_IRGRP | S_IWGRP)) {
+                new_mode |= S_IRGRP | S_IWGRP;  // Read and write for group
+                changes = 1;
+            }
+        } else {
+            if ((st->st_mode & S_IRGRP) == 0) {
+                new_mode |= S_IRGRP;
+                changes = 1;
+            }
         }
     }
 
@@ -179,7 +203,11 @@ void *repair_directory(void *arg) {
             continue;
         }
 
-        snprintf(path, sizeof(path), "%s/%s", cur->dname, d->d_name);
+        int path_len = snprintf(path, sizeof(path), "%s/%s", cur->dname, d->d_name);
+        if (path_len >= sizeof(path)) {
+            log_error("Path truncated: %s/%s\n", cur->dname, d->d_name);
+            continue;  // Skip this file/directory
+        }        
 
         if (lstat(path, &st) == -1) {
             log_error("Error: Unable to stat %s: %s\n", path, strerror(errno));
@@ -201,16 +229,54 @@ void *repair_directory(void *arg) {
                 continue;
             }
 
-            struct threadData new_td;
-            strncpy(new_td.dname, path, sizeof(new_td.dname));
-            new_td.pinode = st.st_ino;
-            new_td.depth = cur->depth + 1;
+            int i;
+            pthread_mutex_lock(&mutexFD);
+            int slot = -1;
+            if (ThreadCNT < MAX_THREADS) {
+                for (i = 0; i < MAX_THREADS; i++) {
+                    if (tdslot[i].THRDid == -1) {
+                        slot = i;
+                        break;
+                    }
+                }
+            }
+            pthread_mutex_unlock(&mutexFD);
 
-            repair_directory(&new_td);
+            struct threadData *new_td;
+            if (slot != -1) {
+                new_td = &tdslot[slot];
+                new_td->THRDid = totalTHRDS++;
+                new_td->flag = 0;
+                ThreadCNT++;
+            } else {
+                new_td = malloc(sizeof(struct threadData));
+                new_td->THRDid = cur->THRDid;
+                new_td->flag = cur->flag + 1;
+            }
+
+            strncpy(new_td->dname, path, sizeof(new_td->dname));
+            new_td->pinode = st.st_ino;
+            new_td->depth = cur->depth + 1;
+
+            if (slot != -1) {
+                pthread_create(&new_td->thread_id, &new_td->tattr, repair_directory, (void *)new_td);
+            } else {
+                repair_directory((void *)new_td);
+                free(new_td);
+            }
         }
     }
 
     closedir(dirp);
+
+    if (cur->flag == 0) {
+        pthread_mutex_lock(&mutexFD);
+        ThreadCNT--;
+        cur->THRDid = -1;
+        pthread_mutex_unlock(&mutexFD);
+        pthread_exit(NULL);
+    }
+
     return NULL;
 }
 
@@ -221,31 +287,72 @@ void remove_trailing_slash(char *path) {
     }
 }
 
+void print_help(const char *program_name) {
+    fprintf(stderr, "Usage: %s [options] <folder>\n", program_name);
+    fprintf(stderr, "Options:\n");
+    fprintf(stderr, "  --dry-run                Show changes without making them\n");    
+    fprintf(stderr, "  --NoSnap                 Ignore .snapshot directories\n");
+    fprintf(stderr, "  --exclude <path>         Specify a full path to exclude (can be used multiple times)\n");
+    fprintf(stderr, "  --change-gids <gids>     Comma-separated list of group IDs to change to next group up\n");
+    fprintf(stderr, "  --force-group-writable   Make all files and folders group readable and writable\n");
+    fprintf(stderr, "  --threads <num>          Set maximum number of threads (current default: %d)\n", MAX_THREADS);        
+    fprintf(stderr, "  -x, --one-file-system    Stay on one file system\n");
+    fprintf(stderr, "  --version                Display version information and exit\n");
+    fprintf(stderr, "  --help                   Display this help message and exit\n");
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s [options] <directory>\n", argv[0]);
-        fprintf(stderr, "Options:\n");
-        fprintf(stderr, "  --NoSnap            Ignore .snapshot directories\n");
-        fprintf(stderr, "  --exclude <file>    Specify a file containing paths to exclude\n");
-        fprintf(stderr, "  -x, --one-file-system  Stay on one file system\n");
-        fprintf(stderr, "  --dry-run           Show changes without making them\n");
-        fprintf(stderr, "  --change-gids <gids>  Comma-separated list of group IDs to change\n");
+        print_help(argv[0]);
         exit(1);
     }
 
     // Parse command-line arguments
     int i;
     char *directory = NULL;
+    char *exclude_files[MAX_EXCLUDES] = {NULL};
+    int exclude_count = 0;
+
+    // Check if setuid bit is set
+    char real_path[MAX_PATH];
+    ssize_t len = readlink("/proc/self/exe", real_path, sizeof(real_path) - 1);
+    if (len != -1) {
+        real_path[len] = '\0';
+        struct stat st;
+        if (stat(real_path, &st) == 0) {
+            if (st.st_mode & S_ISUID) {
+                // Setuid bit is set
+                if (st.st_mode & S_IXOTH) {
+                    fprintf(stderr, "Error: Refusing to run with setuid bit set and world-executable permissions.\n");
+                    exit(1);
+                }
+                char *dir = dirname(real_path);
+                directory = strdup(dir);
+                printf("Running with setuid bit set. Using directory: %s\n", directory);
+            }
+        } else {
+            fprintf(stderr, "Error: Unable to stat the binary\n");
+            exit(1);
+        }
+    } else {
+        fprintf(stderr, "Error: Unable to resolve real path of binary\n");
+        exit(1);
+    }    
+
     for (i = 1; i < argc; i++) {
         if (argv[i][0] == '-') {
             if (strcmp(argv[i], "--NoSnap") == 0) {
                 SNAPSHOT = 1;
             } else if (strcmp(argv[i], "--exclude") == 0) {
                 if (++i < argc) {
-                    get_exclude_list(argv[i], exclude_list);
-                    verify_paths(exclude_list);
+                    if (exclude_count < MAX_EXCLUDES) {
+                        exclude_files[exclude_count++] = argv[i];
+                    } else {
+                        fprintf(stderr, "Error: Too many exclude paths specified. Maximum is %d.\n", MAX_EXCLUDES);
+                        exit(1);
+                    }
                 } else {
-                    fprintf(stderr, "Error: --exclude requires a filename\n");
+                    fprintf(stderr, "Error: --exclude requires a path\n");
                     exit(1);
                 }
             } else if (strcmp(argv[i], "-x") == 0 || strcmp(argv[i], "--one-file-system") == 0) {
@@ -263,10 +370,26 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr, "Error: --change-gids requires a comma-separated list of group IDs\n");
                     exit(1);
                 }
+            } else if (strcmp(argv[i], "--force-group-writable") == 0) {
+                FORCE_GROUP_WRITABLE = 1;
+            } else if (strcmp(argv[i], "--threads") == 0) {
+                if (++i < argc) {
+                    MAX_THREADS = atoi(argv[i]);
+                    if (MAX_THREADS <= 0) {
+                        fprintf(stderr, "Error: Invalid thread count. Must be a positive integer.\n");
+                        exit(1);
+                    }
+                } else {
+                    fprintf(stderr, "Error: --threads requires a number\n");
+                    exit(1);
+                }
+            } else if (strcmp(argv[i], "--version") == 0) {
+                printf("%s version %s\n", argv[0], VERSION);
+                exit(0);
+            } else if (strcmp(argv[i], "--help") == 0) {
+                print_help(argv[0]);
+                exit(0);
             } else if (argv[i][1] == '-') {
-                fprintf(stderr, "Error: Unknown option '%s'\n", argv[i]);
-                exit(1);
-            } else if (strlen(argv[i]) == 2) {
                 fprintf(stderr, "Error: Unknown option '%s'\n", argv[i]);
                 exit(1);
             } else {
@@ -275,16 +398,21 @@ int main(int argc, char *argv[]) {
             }
         } else if (directory == NULL) {
             directory = argv[i];
-        } else {
-            fprintf(stderr, "Error: Unexpected argument '%s'\n", argv[i]);
-            exit(1);
+
         }
     }
 
     if (directory == NULL) {
         fprintf(stderr, "Error: No directory specified\n");
+        print_help(argv[0]);
         exit(1);
     }
+
+    // Process all exclude files
+    for (i = 0; i < exclude_count; i++) {
+        get_exclude_list(exclude_files[i], exclude_list);
+    }
+    verify_paths(exclude_list);
 
     // Remove trailing slash from directory path
     remove_trailing_slash(directory);
@@ -301,18 +429,45 @@ int main(int argc, char *argv[]) {
 
     ST_DEV = root_st.st_dev;
 
+    tdslot = malloc(sizeof(struct threadData) * MAX_THREADS);
+    if (tdslot == NULL) {
+        fprintf(stderr, "Error: Failed to allocate memory for thread data\n");
+        exit(1);
+    }
     pthread_mutex_init(&mutexFD, NULL);
     pthread_mutex_init(&mutexLog, NULL);
 
+    // Initialize thread attributes
+    int error;
+    for (i = 0; i < MAX_THREADS; i++) {
+        tdslot[i].THRDid = -1;
+        if ((error = pthread_attr_init(&tdslot[i].tattr))) {
+            fprintf(stderr, "Failed to create pthread attr: %s\n", strerror(error));
+        } else if ((error = pthread_attr_setdetachstate(&tdslot[i].tattr, PTHREAD_CREATE_DETACHED))) {
+            fprintf(stderr, "Failed to set attribute detached: %s\n", strerror(error));
+        }
+    }
+
     struct threadData root_td;
-    strncpy(root_td.dname, directory, sizeof(root_td.dname));
+    snprintf(root_td.dname, sizeof(root_td.dname), "%s", directory);
     root_td.pinode = 0;
     root_td.depth = 0;
+    root_td.THRDid = totalTHRDS++;
+    root_td.flag = 0;
 
-    repair_directory(&root_td);
+    pthread_create(&root_td.thread_id, &tdslot[0].tattr, repair_directory, (void *)&root_td);
+
+    // Wait for all threads to complete
+    while (ThreadCNT > 0) {
+        usleep(1000);
+    }
 
     pthread_mutex_destroy(&mutexFD);
     pthread_mutex_destroy(&mutexLog);
+    free(tdslot);
+    if (directory != NULL) {
+        free(directory);
+    }
 
     return 0;
 }
