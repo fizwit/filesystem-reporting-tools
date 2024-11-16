@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <fcntl.h>
 #include <sys/types.h>
@@ -30,8 +31,6 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <pthread.h>
 #include <unistd.h>
 #include "pwalk.h"
-
-/* #define THRD_DEBUG */
 
 static char *whoami = "pwalk";
 static char *Version = "3.0.0 Jul 14 2020 John F Dey john@fuzzdog.com";
@@ -53,15 +52,13 @@ static char *Version = "3.0.0 Jul 14 2020 John F Dey john@fuzzdog.com";
 #define MAXEXFILES 512
 char *exclude_list[MAXEXFILES];
 
-int SNAPSHOT =0; /* if set ignore directories called .snapshot */
-int DEPTH = 0; /* if set do not traverse beyond directory depth */
-
 #define MAXTHRDS 32
 int ThreadCNT  = 1; /* ThreadCNT < MAXTHRDS */
 int totalTHRDS =0;
 struct threadData tdslot[MAXTHRDS];
 pthread_mutex_t mutexFD;
-pthread_mutex_t mutexPrintStat;
+pthread_mutex_t mutexFileProcess;
+pthread_mutex_t mutexDirProcess;
 
 /* conditioanally change file ownership --chown_from --chown_to */
 uid_t UID_orig, UID_new;
@@ -69,30 +66,17 @@ gid_t GID_new;
 int chown_flag =0;
 
 /* function prototypes */
-void
-(*fileProcess)( struct threadData *cur, char *exten, struct stat *f, long, long);
+void (*fileProcess)( struct threadData *cur, char *exten, struct stat *f, long, long);
+void (*dirProcess)( struct threadData *cur, char *exten, struct stat *f, long, long);
+void csv_escape(char *in, char *out);
 void *fileDir( void *arg );
 int check_exclude_list(char *fname);
-void verify_paths(char *list[]);
 void get_exclude_list(char *fname, char *list[]);
 void changeOwner( struct threadData *cur, char *exten, struct stat *f,
         long fileCnt, /* directory only - count files in directory */
         long dirSz );  /* directory only - sum of files within directory */
-void printStat( struct threadData *cur, char *exten, struct stat *f,
-        long fileCnt, /* directory only - count files in directory */
-        long dirSz );  /* directory only - sum of files within directory */
-
-void
-printVersion( ) {
-   fprintf(stderr, "%s version %s\n", whoami, Version );
-   fprintf(stderr, "%s Copyright (C) 2013 John F Dey\n", whoami );
-   fprintf(stderr, "pwalk comes with ABSOLUTELY NO WARRANTY;\n" );
-   fprintf(stderr, "This is free software, you can redistribute it and/or\n");
-   fprintf(stderr, "modify it under the\nterms of the GNU General Public");
-   fprintf(stderr, " License as published by the Free Software Foundation;\n");
-   fprintf(stderr, "either version 2 of the License, or (at your option) any");
-   fprintf(stderr, " later version.\n\n" );
-}
+void printVersion(char *whoami, char *Version);
+void add_exclude_name(char *name);
 
 void
 printHeader()
@@ -130,11 +114,45 @@ printHelp()
    printHeader();
 }
 
+/*
+ *  printStat this needs to be in a crital secion  (and it is!)
+ */
+void
+printStat( struct threadData *cur, char *exten, struct stat *f,
+        long fileCnt, /* directory only - count files in directory */
+        long dirSz )  /* directory only - sum of files within directory */
+{
+   char out[FILENAME_MAX+FILENAME_MAX];
+   char fname[FILENAME_MAX];
+   char exten_csv[FILENAME_MAX];
+   ino_t ino, pino;
+   long depth;
+
+   csv_escape(cur->dname, fname);
+   if ( exten )
+      csv_escape(exten, exten_csv);
+   else
+      exten_csv[0] = '\0';
+   if ( fileCnt != -1 ) {  /* directory */
+      ino = f->st_ino; pino = cur->pinode; depth = cur->depth - 1;}
+   else {  /* Not a directory */
+      ino = f->st_ino; pino = cur->pstat.st_ino; depth = cur->depth; }
+   sprintf ( out, "%ju,%ju,%ld,\"%s\",\"%s\",%ld,%ld,%ld,%ld,%ld,%d,\"%07o\",%ld,%ld,%ld,%ld,%ld\n",
+            (uintmax_t)ino, (uintmax_t)pino, depth,
+            fname, exten_csv, (long)f->st_uid,
+            (long)f->st_gid, (long)f->st_size, (long)f->st_dev,
+            (long)f->st_blocks, (int)f->st_nlink,
+            (int)f->st_mode,
+            (long)f->st_atime, (long)f->st_mtime, (long)f->st_ctime,
+            fileCnt, dirSz );
+    fputs( out, stdout );
+}
+
 int
 main( int argc, char* argv[] )
 {
     int error, i, colon =':';
-    char *s, *c, *gid_ptr;
+    char *gid_ptr;
     int rootfd;
     struct stat root;
 
@@ -146,22 +164,18 @@ main( int argc, char* argv[] )
     argc--; argv++;
     while ( argc > 0 && *argv[0] == '-' ) {
         if ( !strcmp(*argv, "--NoSnap" ) )
-           SNAPSHOT = 1;
-        if ( !strcmp(*argv, "--depth" ) ) {
-           argc--; argv++;
-           DEPTH = atoi(*argv);
-        }
+           add_exclude_name(".snapshot");
         if ( !strcmp(*argv, "--help" ) ) {
            printHelp( );
            exit(0); }
-        if ( !strcmp(*argv, "--version" ) || !strcmp(*argv, "-v") )
-           printVersion( );
+        if ( !strcmp(*argv, "--version" ) || !strcmp(*argv, "-v") ) {
+            printVersion(whoami, Version);
+            exit(0); }
         if ( !strcmp(*argv, "--header" ) || !strcmp(*argv, "-v") )
            printHeader();
         if ( !strcmp(*argv, "--exclude" )) {
            argc--; argv++;
-           get_exclude_list(*argv, exclude_list);
-           verify_paths(exclude_list); }
+           get_exclude_list(*argv, exclude_list);}
         if ( !strcmp(*argv, "--chown_from")) {
            argc--; argv++;
            UID_orig = atoi(*argv);
@@ -181,6 +195,7 @@ main( int argc, char* argv[] )
         argc--; argv++;
     }
     fileProcess = &printStat;
+    dirProcess = &printStat;
     if ( chown_flag == 2 ) {
        fprintf(stderr, "chown UID_orig: %d  UID_new: %d GID_new: %d\n", (int)UID_orig, (int)UID_new, (int)GID_new);
        fileProcess = &changeOwner;
@@ -197,17 +212,15 @@ main( int argc, char* argv[] )
                              strerror(error));
     }
     pthread_mutex_init(&mutexFD, NULL);
-    pthread_mutex_init(&mutexPrintStat, NULL);
+    pthread_mutex_init(&mutexFileProcess, NULL);
+    pthread_mutex_init(&mutexDirProcess, NULL);
 
     if ((rootfd = open(*argv, O_DIRECTORY | O_RDONLY)) == -1 ) {
         fprintf( stderr, "Could not open root directory:'%s' %s\n", *argv, strerror(errno));
         exit(errno);
     }
     strcpy( tdslot[0].dname, (const char*) *argv );
-    if ( lstat( *argv, &root ) == -1 ) {
-        fprintf( stderr, "lstat: '%s' %s\n", *argv, strerror(errno));
-        exit(errno);
-    }
+    
     memcpy( &tdslot[0].pstat, &root, sizeof( struct stat ) );
     tdslot[0].dirfd = rootfd;
     tdslot[0].THRDid = totalTHRDS++; /* first thread is zero */

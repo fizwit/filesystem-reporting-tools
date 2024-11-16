@@ -29,6 +29,7 @@ along with this program; If not, see <https://www.gnu.org/licenses/>.
 #include <unistd.h>
 #include <fcntl.h>
 #include <utime.h>
+#include "pwalk.h"
 
 /*
 ppurge  Parallel Purge
@@ -88,50 +89,29 @@ static char *Version = "0.1.0 Aug 14 2023 John F Dey john@fuzzdog.com";
         will be a dedicated process.
 */
 
-#define DEBUG 2  // [0, 1, 2]
-
-#if defined(DEBUG) && DEBUG == 1
- #define DEBUG_1(fmt, args...) fprintf(stderr, "DEBUG: %s(): " fmt, __func__, ##args)
-#elif defined(DEBUG) && DEBUG == 2
- #define DEBUG_1(fmt, args...) fprintf(stderr, "DEBUG: %s(): " fmt, __func__, ##args)
- #define DEBUG_2(fmt, args...) fprintf(stderr, "DEBUG: %s(): " fmt, __func__, ##args)
-#else
- #define DEBUG_1(fmt, args...) /* Don't do anything in release builds */
- #define DEBUG_2(fmt, args...) /* Don't do anything in release builds */
-#endif
 
 FILE *Logfd;   /* error log */
 time_t Ptime;  /* Purge all files older than this time stamp (less than)*/
 time_t Rtime;  /* Remove all files older than this time stamp (Ptime * 2) */
 int DEPTH = 0; /* possible furture use for directory purging */
 
-struct threadData {
-    char dname[FILENAME_MAX+1]; /* full path and basename */
-    int dirfd;                  /* file pointer to directory*/
-    long depth;                 /* directory depth */
-    long THRDid;                /* unique ID increaments with each new THRD */
-    int  flag;                  /* 0 if thread; recursion > 0 */
-    pthread_t thread_id;        /* system assigned */
-    pthread_attr_t tattr;
-};
 
-#define MAXTHRDS 32
 int ThreadCNT  = 1; /* ThreadCNT < MAXTHRDS */
 int totalTHRDS = 0;
 struct threadData tdslot[MAXTHRDS];
 pthread_mutex_t mutexFD;
+pthread_mutex_t mutexFileProcess;
+pthread_mutex_t mutexDirProcess;
 
+/* function prototypes */
 void
-printVersion( ) {
-   fprintf(stderr, "%s version %s\n", whoami, Version );
-   fprintf(stderr, "%s Copyright (C) 2023 John F Dey\n", whoami );
-   fprintf(stderr, "ppurge comes with ABSOLUTELY NO WARRANTY;\n" );
-   fprintf(stderr, "This is free software, you can redistribute it and/or\n");
-   fprintf(stderr, "modify it under the\nterms of the GNU General Public");
-   fprintf(stderr, " License as published by the Free Software Foundation;\n");
-   fprintf(stderr, "GPL version 3 License\n");
-}
-
+(*fileProcess)( struct threadData *cur, char *exten, struct stat *f, long, long);
+void *fileDir( void *arg );
+int check_exclude_list(char *fname);
+void verify_paths(char *list[]);
+void get_exclude_list(char *fname, char *list[]);
+void printVersion(char *whoami, char *Version);
+void csv_escape(char *in, char *out);
 
 void
 printHelp()
@@ -142,27 +122,48 @@ printHelp()
     printf("       --purgeDays (positive integer) Purge files older than n days.\n");
 }
 
-/* Escape CSV delimeters */
-void
-csv_escape(char *in, char *out)
+/*  called from fileDIR() to process directories
+    protected with <mutexDirProcess>
+*/
+void purgeDir(struct threadData *cur, char *exten, struct stat *f, long, long)
 {
-   char *orig;
-   int cnt = 0;
+    struct timespec purgeDir_atime;
 
-   orig = in;
-   while ( *in ) {
-      if ( *in == '"' )
-          *out++ = '"';
-      if ( (unsigned char)*in < 32 ) {
-          in++;
-          cnt++;
-      } else
-          *out++ = *in++;
-   *out = '\0';
-   }
-   if ( cnt )
-       fprintf( Logfd, "Bad File Name: %s\n", orig);
+    if ( !strcmp(".ppurge", d->d_name)) {
+        if (purgedir_fd == -1) {
+            purgedir_fd = openat(cur->dirfd, ".ppurge", O_RDONLY);
+            purgedir_atime = f.st_atime;
+        }
+    }
 }
+
+void
+(*purgeFile)(struct threadData *cur, char *exten, struct stat *f, long, long)
+{
+    int ret;
+
+    if (f.st_mtime <= (time_t)0 || f.st_atime <= (time_t)0) { // BeeGFS issue with empty mtime
+        fprintf(Logfd, "bad mtime: %s\n", cur->dname);
+    if ((ret = utimensat(cur->dirfd, d->d_name, NULL, 0)) != 0)
+        fprintf(Logfd, "utimes fail: %s\n", cur->dname);
+    continue;
+            }
+            if ( (f.st_mode & S_IFMT) == S_IFLNK) {
+                DEBUG_1("link:%s\n", cur->dname);
+                continue;
+            }
+            if ( f.st_mtime < Ptime) {
+                DEBUG_1("purge: %s\n", cur->dname);
+                if ( purgedir_fd == -1 )
+                    purgedir_fd = create_ppurge(cur->dirfd, &purgedir_atime);
+                if (renameat(cur->dirfd, d->d_name, purgedir_fd, d->d_name) == -1) {
+                    fprintf(Logfd, "BADNESS %s could not be moved to .ppurge: %s\n", cur->dname, strerror(errno));
+                } else {
+                    // need full path name for csv output
+                    purgeLog( cur, 'P', &f);
+                }
+            } else
+                fcount +=1; }
 
 /*
  *  purgeLog
@@ -262,151 +263,7 @@ create_ppurge(int dirfd, time_t *purgedir_atime)
     return purgedir_fd;
 }
 
-/********************************
-    Open a directory and read the conents.
-    call opendir with path passed in as an argument
-    stat every file from opendir
-
-    If maxthread is not reached creat a new thread and call self
-    If no threads available Recursively call self for each directory
-    from opendir.
-
-*********************************/
-void
-*fileDir( void *arg )
-{
-    char *s, *t, *end_dname;
-    int  slot =0, ret;
-    int fcount;
-    DIR *dirp;
-    int subfd, purgedir_fd = -1;
-    time_t purgedir_atime;
-    long localCnt =0; /* number of files in a specific directory */
-    struct dirent *d;
-    struct stat f;
-    struct threadData *cur, thrd_inst = {.THRDid = -1}, *thrd_ptr = &thrd_inst;
-
-    cur = (struct threadData *) arg;
-    DEBUG_2("threadID=%ld,rdepth=%ld,file=%s\n", cur->THRDid, cur->depth, cur->dname);
-    if ((dirp = fdopendir( cur->dirfd )) == NULL ) {
-        fprintf( Logfd, "Locked Dir: %s\n", cur->dname );
-        goto return_thread;
-    }
-    s = cur->dname + strlen(cur->dname);
-    *s++ = '/';
-    end_dname = s;
-    while ( (d = readdir( dirp )) != NULL ) {
-        if ( d->d_name[0] == '.' && 
-             (!d->d_name[1] || (d->d_name[1]=='.' && !d->d_name[2]))) continue;
-        s = d->d_name; t = end_dname;
-        while ( *s )  /* copy file name to end of cur->dname */
-            *t++ = *s++;
-        *t = '\0';
-        if ( fstatat( cur->dirfd, d->d_name, &f, AT_SYMLINK_NOFOLLOW) == -1 ) {
-            fprintf( Logfd, "threadID=%ld,rdepth=%d fstatat: '%s' %s\n",
-              cur->THRDid, cur->flag, strerror(errno), cur->dname);
-            continue;
-        }
-        fprintf(stderr, "%8ld %s\n",f.st_size, cur->dname);
-        /* Follow Sub dirs recursivly but don't follow links */
-        if ( S_ISDIR(f.st_mode) ) {
-            if ( !strcmp(".ppurge", d->d_name)) {
-                if (purgedir_fd == -1) {
-                    purgedir_fd = openat(cur->dirfd, ".ppurge", O_RDONLY);
-                    purgedir_atime = f.st_atime;
-                }
-                continue;
-            }
-            s = d->d_name; t = end_dname;
-            while ( *s )  /* copy file name to end of current path */
-                *t++ = *s++;
-            if ((subfd = openat(cur->dirfd, d->d_name, O_RDONLY)) == -1 ) {
-                fprintf(Logfd, "openat fail: %s\n", cur->dname);
-                continue;
-            }
-            DEBUG_1("follow directory: %s\n", cur->dname);
-            pthread_mutex_lock (&mutexFD);
-            if ( ThreadCNT < MAXTHRDS ) {
-                slot = 0;
-                while ( slot < MAXTHRDS ) {
-                    if ( tdslot[slot].THRDid == -1 ) {
-                        thrd_ptr = &tdslot[slot];
-                        thrd_ptr->THRDid = totalTHRDS++;
-                        thrd_ptr->flag = 0;   /* recurse flag reset for thread instance */
-                        thrd_ptr->dirfd = subfd;
-                        break;
-                    }
-                    slot++;
-                }
-                ThreadCNT++; /* allocate the thread */
-            } else {
-                thrd_ptr = &thrd_inst;
-                thrd_ptr->THRDid = cur->THRDid;
-                thrd_ptr->flag = cur->flag + 1;
-                thrd_ptr->dirfd = subfd;
-            }
-            pthread_mutex_unlock (&mutexFD);
-            /* create ponter to tdslot that will be used for next
-               call to fileDir - local or from array - shorten next block of
-               code
-             */
-            strcpy( thrd_ptr->dname, (const char*)cur->dname );
-            thrd_ptr->depth  = cur->depth + 1;
-            if ( thrd_ptr->THRDid != cur->THRDid ) {  /* new thread available */
-                DEBUG_1("creating new thread: %s\n", thrd_ptr->dname);
-                pthread_create( &tdslot[slot].thread_id, &tdslot[slot].tattr,
-                                fileDir, (void*)thrd_ptr );
-            } else
-                fileDir( (void*) thrd_ptr );
-        } else { /* regular file */
-            if (f.st_mtime <= (time_t)0 || f.st_atime <= (time_t)0) { // BeeGFS issue with empty mtime
-                fprintf(Logfd, "bad mtime: %s\n", cur->dname);
-                if ((ret = utimensat(cur->dirfd, d->d_name, NULL, 0)) != 0)
-                    fprintf(Logfd, "utimes fail: %s\n", cur->dname);
-                continue;
-            }
-            if ( (f.st_mode & S_IFMT) == S_IFLNK) {
-                DEBUG_1("link:%s\n", cur->dname);
-                continue;
-            }
-            if ( f.st_mtime < Ptime) {
-                DEBUG_1("purge: %s\n", cur->dname);
-                if ( purgedir_fd == -1 )
-                    purgedir_fd = create_ppurge(cur->dirfd, &purgedir_atime);
-                if (renameat(cur->dirfd, d->d_name, purgedir_fd, d->d_name) == -1) {
-                    fprintf(Logfd, "BADNESS %s could not be moved to .ppurge: %s\n", cur->dname, strerror(errno));
-                } else {
-                    // need full path name for csv output
-                    purgeLog( cur, 'P', &f);
-                }
-            } else
-                localCnt++;
-        }
-    }
-    if ( purgedir_fd != -1 ) {
-        fcount = rm_purged(cur, cur->dname, purgedir_atime, purgedir_fd);
-        if ( fcount == 0 )  /* directory is empty */
-            if ((ret = unlinkat(cur->dirfd, ".ppurge", AT_REMOVEDIR)) != 0) {
-                fprintf( Logfd, "unlink .ppurge failed: '%s'\n", strerror(errno));
-            }
-
-    }
-    closedir( dirp );
-    *--end_dname = '\0';
-
-return_thread:
-    if ( cur->flag == 0 ) { /* this instance of fileDir is a thread */
-        pthread_mutex_lock ( &mutexFD );
-        DEBUG_2("msg=endTHRD,threadID=%ld,rdepth=%d,file=<%s>\n", cur->THRDid, cur->flag, cur->dname);
-        --ThreadCNT;
-        cur->THRDid = -1;
-        pthread_mutex_unlock ( &mutexFD );
-        pthread_exit( EXIT_SUCCESS );
-    } else
-        return 0;
-}
-
-/* open a log file */
+/* open a log file to record purged files */
 void
 openLog(time_t now)
 {
@@ -430,19 +287,22 @@ main( int argc, char* argv[] )
         printHelp( );
         exit( EXIT_FAILURE );
     }
-    argc--; argv++;
     now = time(NULL);
+    exclude_list[0] = NULL;
+    argc--; argv++;
     while ( argc > 0 && *argv[0] == '-' ) {
-        if ( !strcmp(*argv, "--depth" ) ) {
-           argc--; argv++;
-           DEPTH = atoi(*argv);
-        }
+        if ( !strcmp(*argv, "--NoSnap" ) )
+           add_exclude_name(".snapshot");
         if ( !strcmp(*argv, "--help" ) ) {
-           printHelp( );
-           exit(0); }
+            printHelp( );
+            exit(0); }
         if ( !strcmp(*argv, "--version" ) || !strcmp(*argv, "-v") ) {
-           printVersion( );
-           exit(0); }
+            printVersion(whoami, Version);
+            exit(0); }
+        if ( !strcmp(*argv, "--exclude" )) {
+            argc--; argv++;
+            get_exclude_list(*argv, exclude_list);
+            verify_paths(exclude_list); }
         if ( !strcmp(*argv, "--purgeDays")) {
             argc--; argv++;
             pdays = atoi(*argv);
@@ -460,21 +320,18 @@ main( int argc, char* argv[] )
         fprintf(stderr, "--purgeDays must be specified\n");
         exit(1);
     }
-    if ( setuid((uid_t) 0)) {
-       fprintf(stderr, "unable to setuid root; not all files will be processed\n");
-       exit(1);
-    }
     (void) umask((mode_t)00); /* create .ppurge directories with 1777 like /tmp */
     
-
+    fileProcess = &purgeFile;
     for ( i=0; i<MAXTHRDS; i++ ) {
         tdslot[i].THRDid = -1;
         if ( (error = pthread_attr_init( &tdslot[i].tattr )) )
-            fprintf( Logfd, "Failed to create pthread attr: %s\n", strerror(error));
+            fprintf( stderr, "Failed to create pthread attr: %s\n", strerror(error));
         else if ( (error = pthread_attr_setdetachstate( &tdslot[i].tattr, PTHREAD_CREATE_DETACHED)) )
-            fprintf( Logfd, "failed to set attribute detached: %s\n", strerror(error));
+            fprintf( stderr, "failed to set attribute detached: %s\n", strerror(error));
     }
     pthread_mutex_init(&mutexFD, NULL);
+    pthread_mutex_init(&mutexFileProcess, NULL);
 
     if ((rootfd = open(*argv, O_DIRECTORY | O_RDONLY)) == -1 ) {
         fprintf( stderr, "Could not open root directory:'%s' %s\n", *argv, strerror(errno));
@@ -482,10 +339,10 @@ main( int argc, char* argv[] )
     }
     strcpy( tdslot[0].dname, (const char*) *argv );
     tdslot[0].dirfd = rootfd;
-
     tdslot[0].THRDid = totalTHRDS++; /* first thread is zero */
     tdslot[0].flag = 0;
     tdslot[0].depth = 0;
+    tdslot[0].pstat.st_ino = 0;
     pthread_create( &(tdslot[0].thread_id), &tdslot[0].tattr, fileDir, (void*)&tdslot[0] );
     pthread_exit( NULL );
 }

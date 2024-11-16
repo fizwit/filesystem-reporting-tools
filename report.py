@@ -18,8 +18,9 @@ _author_ = 'jfdey@fredhutch.org'
 
 # pwalk fields
 fields = ['inode', 'parent-inode', 'directory-depth', 'filename', 'extension',
- 'UID', 'GID', 'st_size', 'st_dev', 'st_blocks"', 'st_nlink', '"st_mode"',
- 'atime', 'mtime', 'ctime', 'fcount', 'sum']
+          'UID', 'GID', 'st_size', 'st_dev', 'st_blocks"', 'st_nlink', '"st_mode"',
+          'atime', 'mtime', 'ctime', 'fcount', 'sum']
+
 
 def sizeof_fmt(num, suffix='B'):
     for unit in ['','Ki','Mi','Gi','Ti','Pi','Ei','Zi']:
@@ -84,5 +85,64 @@ def basic_report():
         print('{:8} {}'.format(sizeof_fmt(v),k))
 
 
+# Declare the global variable
+file_extension_summary = {}
+
+
+def summary():
+    """ print summary of file extensions 
+    sorted by count
+    """
+    print("Summary of file extensions")
+    sorted_data = []
+    sorted_data = sorted(file_extension_summary.items(), key=lambda x: x[1], reverse=True)
+    for ext, count in sorted_data:
+        print("{}: {}".format(ext, count))
+
+
+def process(row, line_num):
+    """" process pwalk data "
+         create summary of column '4' which is file extenstion
+         Output Number of unique file extensions with a count for each
+    """
+    if len(row) != 17:
+        print("malformed CSV record:\n{}".format(row))
+    if row[4] == '':
+        return
+    if row[4] in file_extension_summary:
+        file_extension_summary[row[4]] += 1
+    else:
+        file_extension_summary[row[4]] = 1
+    if row[4] == 'css':
+        print(f'{row[3]}')
+
+
+def readCSVfile(filename):
+    """ read data from stdin
+       input data file format is output from pwalk
+       columns
+       inode,parent-inode,directory-depth,"filename","fileExtension",
+       UID,GID,st_size,st_dev,st_blocks,
+       st_nlink,"st_mode",st_atime,st_mtime,st_ctime,
+       pw_fcount,pw_dirsum
+    """
+    with open(filename, 'r', encoding='latin-1') as csv_in:
+        reader = csv.reader(csv_in)
+        try:
+            for row in reader:
+                if len(row) != 17:
+                    print("malformed CSV record:\n{}".format(row))
+                process(row, reader.line_num)
+        except csv.Error as e:
+            sys.exit('input err: line {}: {}'.format(reader.line_num, e))
+
+
+def main():
+    filename = sys.argv[1]
+    readCSVfile(filename)
+    summary()
+    #  histogram()
+
+
 if __name__ == '__main__':
-    basic_report()
+    main()   
