@@ -54,6 +54,7 @@ static char *Version = "3.0.0 Jul 14 2020 John F Dey john@fuzzdog.com";
 char *exclude_list[MAXEXFILES];
 
 int SNAPSHOT =0; /* if set ignore directories called .snapshot */
+int SNAPSHOTX =0; /* if set ignore directories called snapshots OSX */
 int DEPTH = 0; /* if set do not traverse beyond directory depth */
 int ONE_FS =0; /* skip directories on different file systems -x */
 dev_t ST_DEV;  /* save st_dev of root file */
@@ -123,6 +124,7 @@ printHelp()
    printf("Flags: --help --version \n" );
    printf("       --depth n Stop walking when (n) depth is reached\n");
    printf("       --NoSnap Ignore directories with name .snapshot\n");
+   printf("       --NoSnapX Ignore OSX snapshots directories\n");
    printf("       --exclude filename <file> contains a list of");
    printf(" directories \n");
    printf("         to exclude from reporting\n");
@@ -207,6 +209,8 @@ void
         if ( S_ISDIR(f.st_mode) ) {
             if ( SNAPSHOT && !strcmp( ".snapshot", d->d_name ) )
                continue; /* next file from readdir */
+            if ( SNAPSHOTX && !strcmp( "snapshots", d->d_name ) )
+               continue; /* next file from readdir */
             if ( DEPTH && DEPTH == cur->depth )
                continue; /* don't do any deeper than this */
             if ( exclude_list[0] && check_exclude_list(cur->dname) )
@@ -287,6 +291,7 @@ void
     fprintf( stderr, "msg=endRecurse,threadID=%ld,rdepth=%d,file=<%s>\n",
         cur->THRDid, cur->flag, cur->dname );
 #endif /* THRD_DEBUG */
+    return NULL;
 }
 
 int
@@ -305,6 +310,8 @@ main( int argc, char* argv[] )
     while ( argc > 0 && *argv[0] == '-' ) {
         if ( !strcmp(*argv, "--NoSnap" ) )
            SNAPSHOT = 1;
+        if ( !strcmp(*argv, "--NoSnapX" ) )
+           SNAPSHOTX = 1;
         if ( !strcmp(*argv, "--depth" ) ) {
            argc--; argv++;
            DEPTH = atoi(*argv);
@@ -330,7 +337,8 @@ main( int argc, char* argv[] )
         if ( !strcmp(*argv, "--chown_to")) {
            argc--; argv++;
            UID_new = atoi(*argv);
-           if ( gid_ptr = strchr(*argv, colon))
+           gid_ptr = strchr(*argv, colon);
+           if (gid_ptr != NULL)
               GID_new = atoi(++gid_ptr);
            else {
               fprintf( stderr, "--chown_to requires UID:GID as argument\n");

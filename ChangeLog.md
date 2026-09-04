@@ -1,6 +1,23 @@
 # Change Log
 All notable changes to pwalk will be documented in this file.
 
+## 2026.09.04
+  - Lets not mark files names with control characters [0-32] as 'bad files'. 
+  Map control characters in the file names to two character strings like: "\n" when they have
+  a mapping, and skip over characters with no mapping. 
+    '\a'  // 7  — Bell
+    '\b'  // 8  — Backspace
+    '\t'  // 9  — Horizontal tab
+    '\n'  // 10 — Line feed
+    '\v'  // 11 — Vertical tab
+    '\f'  // 12 — Form feed
+    '\r'  // 13 — Carriage return
+   
+## 2026.03.07
+  - OSX Library directory uses snapshot to save state of Application upgrades, the
+    snapshot directories are taking up about 80% of my home dir. Add --NoSnapX feature
+  - Fix compiler issues. Add return value to `fileProcess` function
+
 ## 2023.09.14
   - ppurge tested on production BeeGFS file system to maintain delete30 tempary file
     system. 
