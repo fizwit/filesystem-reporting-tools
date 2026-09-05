@@ -1,29 +1,29 @@
 /*
- *  fileProcess.c
+ *  fileprocess.c
 
-Copyright (C) (2013-2016) John F Dey
+copyright (c) (2013-2016) john f dey
 
-This program is free software; you can redistribute it and/or
-modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
-of the License, or (at your option) any later version.
+this program is free software; you can redistribute it and/or
+modify it under the terms of the gnu general public license
+as published by the free software foundation; either version 2
+of the license, or (at your option) any later version.
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
+this program is distributed in the hope that it will be useful,
+but without any warranty; without even the implied warranty of
+merchantability or fitness for a particular purpose.  see the
+gnu general public license for more details.
 
-You should have received a copy of the GNU General Public License
-along with this program; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+you should have received a copy of the gnu general public license
+along with this program; if not, write to the free software
+foundation, inc., 51 franklin street, fifth floor, boston, ma  02110-1301, usa.
 
  */
 
 /*
 
-For each file found by Pwalk, process the file.
-File processing functions go in this file.  File process routines must
-keep the same arguments as defined by the prototype fileProcess()
+for each file found by pwalk, process the file.
+file processing functions go in this file.  file process routines must
+keep the same arguments as defined by the prototype fileprocess()
 
  */
 
@@ -39,30 +39,31 @@ keep the same arguments as defined by the prototype fileProcess()
 extern uid_t UID_orig, UID_new;
 extern gid_t GID_new;
 extern int chown_flag;
+
+/* rewrite control characters */
 static const unsigned char escape_code[32] = {
-    [6]  = 'a',
-    [7]  = 'b',
-    [8]  = 't',
-    [9]  = 'n',
-    [10] = 'v',
-    [11] = 'f',
-    [12] = 'r'
+    [7]  = 'a',  // bell
+    [8]  = 'b',  // backspace 
+    [9]  = 't',  // tab
+    [10] = 'n',  // line feed
+    [11] = 'v',  // vertical tab
+    [12] = 'f',  // form feed
+    [13] = 'r'   // carriage return
 };
 
-
-/* Escape CSV delimeters */
+/* Escape CSV delimeters, replace control characters */
 void
 csv_escape(char *in, char *out)
 {
    char *t, *orig;
-   int cnt = 0;
 
    t = out;
    orig = in;
    while ( *in ) {
-      if ( *in == '"' )
+      if ( *in == '"' ) {
           *out++ = '"';
-      if ( (unsigned char)*in < 32 ) {
+          *out++ = *in++;
+      } else if ( (unsigned char)*in < 32 ) {
           if ( escape_code[(int)*in] ) {
               *out++ = '\\';
               *out++ = escape_code[(int)*in];
@@ -70,10 +71,8 @@ csv_escape(char *in, char *out)
           in++;
       } else
           *out++ = *in++;
-   *out = '\0';
    }
-   if ( cnt )
-       fprintf( stderr, "Bad File: %s\n", orig);
+   *out = '\0';
 }
 
 
