@@ -281,7 +281,7 @@ void
               cur->THRDid, cur->flag, strerror(errno), cur->dname);
             continue;
         }
-        fprintf(stderr, "%8ld %s\n",f.st_size, cur->dname);
+        fprintf(stderr, "%8lld %s\n",f.st_size, cur->dname);
         /* Follow Sub dirs recursivly but don't follow links */
         if ( S_ISDIR(f.st_mode) ) {
             if ( !strcmp(".ppurge", d->d_name)) {

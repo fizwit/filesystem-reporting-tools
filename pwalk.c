@@ -319,7 +319,7 @@ main( int argc, char* argv[] )
         if ( !strcmp(*argv, "--chown_to")) {
            argc--; argv++;
            UID_new = atoi(*argv);
-           if ( gid_ptr = strchr(*argv, colon))
+           if ( (gid_ptr = strchr(*argv, colon)) )
               GID_new = atoi(++gid_ptr);
            else {
               fprintf( stderr, "--chown_to requires UID:GID as argument\n");
