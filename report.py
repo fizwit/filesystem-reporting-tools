@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import sys
 import csv
@@ -62,6 +62,7 @@ def basic_report():
     # sorted_size is list of tuples (uid, size)
     sorted_size = sorted(summary.items(), key=operator.itemgetter(1))
 
+    print()
     for user in sorted_size:
         try:
             uname = pwd.getpwuid(int(user[0])).pw_name
@@ -113,8 +114,6 @@ def process(row, line_num):
         file_extension_summary[row[4]] += 1
     else:
         file_extension_summary[row[4]] = 1
-    if row[4] == 'css':
-        print(f'{row[3]}')
 
 
 def readCSVfile(filename):
@@ -141,6 +140,7 @@ def main():
     filename = sys.argv[1]
     readCSVfile(filename)
     summary()
+    basic_report()
     #  histogram()
 
 

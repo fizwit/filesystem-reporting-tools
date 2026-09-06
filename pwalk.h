@@ -34,7 +34,6 @@ struct threadData {
     char dname[FILENAME_MAX+1]; /* full path and basename */
     ino_t pinode;               /* Parent Inode */
     int dirfd;                  /* file pointer to directory*/
-    
     long depth;                 /* directory depth */
     long THRDid;                /* unique ID increaments with each new THRD */
     int  flag;                  /* 0 if thread; recursion > 0 */

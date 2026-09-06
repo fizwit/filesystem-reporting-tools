@@ -3,18 +3,20 @@ CC    = gcc
 # CFLAGS ?= -O2 -Wall -Wextra -Werror -std=c99
 CFLAGS ?= -O2  
 LDFLAGS = -lpthread
-DEBUG ?= 0
+PW_MAXTHRDS ?= 32
+PW_DEBUG ?= 0
 
-$(info DEBUG is $(DEBUG))
+CFLAGS += -DPW_MAXTHRDS=$(PW_MAXTHRDS)
+$(info PW_DEBUG is $(PW_DEBUG))
 
-ifeq ($(DEBUG),1)
-    CFLAGS += -DDEBUG=1
+ifeq ($(PW_DEBUG),1)
+    CFLAGS += -DPW_DEBUG=1
 endif
-ifeq ($(DEBUG),2)
-    CFLAGS += -DDEBUG=2
+ifeq ($(PW_DEBUG),2)
+    CFLAGS += -DPW_DEBUG=2
 endif 
-ifeq ($(DEBUG),3)
-    CFLAGS += -DDEBUG=3
+ifeq ($(PW_DEBUG),3)
+    CFLAGS += -DPW_DEBUG=3
 endif
 
 default: all
@@ -22,9 +24,9 @@ default: all
 all: pwalk ppurge
 
 
-pwalk: pwalk.c exclude.c fileProcess.c fileDir.c pwalk.h version.c
-	$(CC) $(CFLAGS) -DPWALK -o pwalk version.c exclude.c fileProcess.c fileDir.c pwalk.c $(LDFLAGS) 
+pwalk:   pwalk.c exclude.c fileProcess.c changeOwn.c version.c pwalk.h
+	$(CC) $(CFLAGS) -DPWALK -o pwalk pwalk.c version.c exclude.c fileProcess.c changeOwn.c $(LDFLAGS) 
 
-ppurge: ppurge.c fileDir.c exclude.c version.c pwalk.h
-	$(CC) $(CFLAGS) -Dppurge -o ppurge ppurge.c version.c fileDir.c exclude.c $(LDFLAGS)
+ppurge: ppurge.c version.c pwalk.h
+	$(CC) $(CFLAGS) -Dppurge -o ppurge ppurge.c version.c fileProcess.c $(LDFLAGS)
 

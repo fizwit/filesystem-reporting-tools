@@ -4,4 +4,9 @@ test.lst
 test
 output*
 *.o
+<<<<<<< HEAD
 .vscode
+=======
+ppurge
+>>>>>>> 898e0ad0b082206154ce9ca33f377f6bd1609723
+ppurge

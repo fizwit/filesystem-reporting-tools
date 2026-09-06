@@ -119,7 +119,7 @@ void
                code
              */
             memcpy( &(thrd_ptr->pstat), &f, sizeof( struct stat ) );  /* <-- what does this do? */
-            strcpy( thrd_ptr->dname, (const char*)cur->dname );
+            // strcpy( thrd_ptr->dname, (const char*)cur->dname );
             thrd_ptr->depth  = cur->depth + 1;
             thrd_ptr->pinode = cur->pstat.st_ino; /* Parent Inode */
             if ( thrd_ptr->THRDid != cur->THRDid ) {  /* new thread available */
@@ -129,26 +129,38 @@ void
             } else
                 fileDir( (void*) thrd_ptr );
         } else { /* regular file */
-            // if ( (f.st_mode & S_IFMT) == S_IFLNK) {
-            //    DEBUG_1("link:%s\n", cur->dname);
-            //    continue;
-            //}
-           s = end_dname + 1; dot = NULL; /* file extension */
-           while ( *s ) {
-               if (*s == '.') dot = s+1;
-               s++;
-           }
+            s = end_dname + 1; dot = NULL; /* file extension */
+            while ( *s ) {
+                if (*s == '.') dot = s+1;
+                s++;
+            }
+#ifdef PPURGE
+            if ( f.st_mtime < Ptime) {
+                DEBUG_1("purge: %s\n", cur->dname);
+                if ( purgedir_fd == -1 )
+                    purgedir_fd = create_ppurge(cur->dirfd, &purgedir_atime);
+                if (renameat(cur->dirfd, d->d_name, purgedir_fd, d->d_name) == -1) {
+                    fprintf(Logfd, "BADNESS %s could not be moved to .ppurge: %s\n", cur->dname, strerror(errno));
+                } else {
+                    // need full path name for csv output
+                    purgeLog( cur, 'P', &f);
+                }
+#endif // PPURGE
+#ifdef PWALK
            pthread_mutex_lock (&mutexFileProcess);
            (*fileProcess)( cur, dot, &f, (long)-1, (long)0 );
            pthread_mutex_unlock (&mutexFileProcess);
+#endif // PWALK
         }
     }
     closedir( dirp );
     *--end_dname = '\0';
 
+#ifdef PWALK
     pthread_mutex_lock (&mutexFileProcess);
     (*fileProcess)( cur, NULL, &cur->pstat, localCnt, localSz);
     pthread_mutex_unlock (&mutexFileProcess);
+#endif // PWALK
 
 return_thread:
     if ( cur->flag == 0 ) { /* this instance of fileDir is a thread */

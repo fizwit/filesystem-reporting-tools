@@ -36,53 +36,37 @@ keep the same arguments as defined by the prototype fileProcess()
 #include <stdint.h>
 #include "pwalk.h"
 
-/* conditioanally change file ownership --chown_from --chown_to */
-extern uid_t UID_orig, UID_new;
-extern gid_t GID_new;
-extern int chown_flag;
+/* rewrite control characters */
+static const unsigned char escape_code[32] = {
+    [7]  = 'a',  // bell
+    [8]  = 'b',  // backspace
+    [9]  = 't',  // tab
+    [10] = 'n',  // line feed
+    [11] = 'v',  // vertical tab
+    [12] = 'f',  // form feed
+    [13] = 'r'   // carriage return
+};
 
-/* Escape CSV delimeters */
+
+/* Escape CSV delimeters, replace control characters */
 void
 csv_escape(char *in, char *out)
 {
    char *orig;
-   int cnt = 0;
 
    orig = in;
    while ( *in ) {
-      if ( *in == '"' )
+      if ( *in == '"' ) {
           *out++ = '"';
-      if ( (unsigned char)*in < 32 ) {
+          *out++ = *in++;
+      } else if ( (unsigned char)*in < 32 ) {
+          if ( escape_code[(int)*in] ) {
+              *out++ = '\\';
+              *out++ = escape_code[(int)*in];
+          }
           in++;
-          cnt++;
       } else
           *out++ = *in++;
+   }
    *out = '\0';
-   }
-   if ( cnt )
-       fprintf( stderr, "Bad File: %s\n", orig);
-}
-
-
-/*
- * conditionally change file ownership
- * if file owned by UID_orig chown UID_new:GID_new
- */
-void
-changeOwner( struct threadData *cur, char *exten, struct stat *f,
-        long fileCnt, /* directory only - count files in directory */
-        long dirSz )  /* directory only - sum of files within directory */
-{
-   int stat;
-   char fname[FILENAME_MAX];
-
-   if ( f->st_uid == UID_orig ) {
-      csv_escape(cur->dname, fname);
-      if ((stat = chown((const char*)cur->dname, (uid_t)UID_new, (gid_t)GID_new)))
-         fprintf(stderr, "could not chown %s\n", fname);
-      else {
-         fputs(fname, stdout);
-         fputc('\n', stdout);
-      }
-   }
 }
